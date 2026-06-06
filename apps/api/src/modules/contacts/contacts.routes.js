@@ -249,8 +249,13 @@ export async function contactsRoutes(fastify) {
     `
     if (!contacts.length) return reply.code(404).send({ error: 'Contacto no encontrado' })
 
+    const phones = await sql`SELECT * FROM contact_phones WHERE contact_id = ${req.params.id} ORDER BY is_primary DESC, created_at`
+    const emails = await sql`SELECT * FROM contact_emails WHERE contact_id = ${req.params.id} ORDER BY is_primary DESC, created_at`
+
     const contact = {
       ...contacts[0],
+      phones,
+      emails,
       lists: contacts.map(c => ({ id: c.list_id, name: c.list_name })),
     }
 
@@ -358,54 +363,175 @@ export async function contactsRoutes(fastify) {
     }
   })
 
-  // Buscar contactos por nombre, email o teléfono (para el modal nuevo mensaje)
+  // Buscar contactos por nombre, email o teléfono (busca en tablas múltiples)
   fastify.get('/contacts/search', auth, async (req) => {
     const { q = '', limit = 20 } = req.query
     const term = `%${q}%`
     return sql`
-      SELECT DISTINCT ON (c.phone, c.email)
+      SELECT DISTINCT ON (c.id)
         c.id, c.first_name, c.last_name, c.email, c.phone,
         cl.name AS list_name
       FROM contacts c
       JOIN contact_lists cl ON cl.id = c.list_id
+      LEFT JOIN contact_phones cp ON cp.contact_id = c.id
+      LEFT JOIN contact_emails ce ON ce.contact_id = c.id
       WHERE c.client_id = ${req.user.sub}
         AND (
           c.first_name ILIKE ${term} OR
           c.last_name  ILIKE ${term} OR
           c.email      ILIKE ${term} OR
-          c.phone      ILIKE ${term}
+          c.phone      ILIKE ${term} OR
+          cp.phone     ILIKE ${term} OR
+          ce.email     ILIKE ${term}
         )
-      ORDER BY c.phone, c.email, c.first_name
+      ORDER BY c.id, c.first_name
       LIMIT ${limit}
     `
   })
 
-  // Buscar info de un contacto por número de teléfono (para el panel derecho del inbox)
+  // Buscar info de un contacto por número de teléfono (busca en contact_phones también)
   fastify.get('/contacts/by-phone/:phone', auth, async (req) => {
     const phone = decodeURIComponent(req.params.phone)
     const contacts = await sql`
-      SELECT
+      SELECT DISTINCT ON (c.id)
         c.id, c.first_name, c.last_name, c.email, c.phone,
         c.metadata, c.is_subscribed, c.created_at,
         cl.id AS list_id, cl.name AS list_name
       FROM contacts c
       JOIN contact_lists cl ON cl.id = c.list_id
+      LEFT JOIN contact_phones cp ON cp.contact_id = c.id
       WHERE c.client_id = ${req.user.sub}
-        AND c.phone = ${phone}
-      ORDER BY cl.created_at
+        AND (c.phone = ${phone} OR cp.phone = ${phone})
+      ORDER BY c.id, cl.created_at
     `
     if (!contacts.length) return null
     const base = contacts[0]
+    const phones = await sql`SELECT * FROM contact_phones WHERE contact_id = ${base.id} ORDER BY is_primary DESC, created_at`
+    const emails = await sql`SELECT * FROM contact_emails WHERE contact_id = ${base.id} ORDER BY is_primary DESC, created_at`
     return {
-      id:           base.id,
-      first_name:   base.first_name,
-      last_name:    base.last_name,
-      email:        base.email,
-      phone:        base.phone,
-      metadata:     base.metadata,
+      id:            base.id,
+      first_name:    base.first_name,
+      last_name:     base.last_name,
+      email:         base.email,
+      phone:         base.phone,
+      metadata:      base.metadata,
       is_subscribed: base.is_subscribed,
+      phones,
+      emails,
       lists: contacts.map(c => ({ id: c.list_id, name: c.list_name })),
     }
+  })
+
+  // ── Múltiples teléfonos ────────────────────────────────────────────────────
+
+  fastify.post('/contacts/:id/phones', auth, async (req, reply) => {
+    const { phone, label = 'Principal' } = z.object({
+      phone: z.string().min(6),
+      label: z.string().optional().default('Principal'),
+    }).parse(req.body)
+
+    const [contact] = await sql`SELECT id FROM contacts WHERE id = ${req.params.id} AND client_id = ${req.user.sub}`
+    if (!contact) return reply.code(404).send({ error: 'Contacto no encontrado' })
+
+    const existing = await sql`SELECT COUNT(*) FROM contact_phones WHERE contact_id = ${req.params.id}`
+    const isFirst  = parseInt(existing[0].count) === 0
+
+    const [cp] = await sql`
+      INSERT INTO contact_phones (contact_id, client_id, phone, label, is_primary)
+      VALUES (${req.params.id}, ${req.user.sub}, ${phone}, ${label}, ${isFirst})
+      ON CONFLICT (contact_id, phone) DO NOTHING
+      RETURNING *
+    `
+    if (isFirst) await sql`UPDATE contacts SET phone = ${phone} WHERE id = ${req.params.id}`
+    return reply.code(201).send(cp)
+  })
+
+  fastify.delete('/contacts/:id/phones/:phoneId', auth, async (req, reply) => {
+    const [cp] = await sql`
+      SELECT * FROM contact_phones WHERE id = ${req.params.phoneId} AND contact_id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!cp) return reply.code(404).send({ error: 'Teléfono no encontrado' })
+
+    await sql`DELETE FROM contact_phones WHERE id = ${req.params.phoneId}`
+
+    if (cp.is_primary) {
+      const [next] = await sql`SELECT id, phone FROM contact_phones WHERE contact_id = ${req.params.id} ORDER BY created_at LIMIT 1`
+      if (next) {
+        await sql`UPDATE contact_phones SET is_primary = true WHERE id = ${next.id}`
+        await sql`UPDATE contacts SET phone = ${next.phone} WHERE id = ${req.params.id}`
+      } else {
+        await sql`UPDATE contacts SET phone = null WHERE id = ${req.params.id}`
+      }
+    }
+    return { deleted: true }
+  })
+
+  fastify.patch('/contacts/:id/phones/:phoneId/primary', auth, async (req, reply) => {
+    const [cp] = await sql`
+      SELECT * FROM contact_phones WHERE id = ${req.params.phoneId} AND contact_id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!cp) return reply.code(404).send({ error: 'Teléfono no encontrado' })
+
+    await sql`UPDATE contact_phones SET is_primary = false WHERE contact_id = ${req.params.id}`
+    await sql`UPDATE contact_phones SET is_primary = true  WHERE id = ${req.params.phoneId}`
+    await sql`UPDATE contacts SET phone = ${cp.phone} WHERE id = ${req.params.id}`
+    return { ok: true }
+  })
+
+  // ── Múltiples emails ───────────────────────────────────────────────────────
+
+  fastify.post('/contacts/:id/emails', auth, async (req, reply) => {
+    const { email, label = 'Principal' } = z.object({
+      email: z.string().email(),
+      label: z.string().optional().default('Principal'),
+    }).parse(req.body)
+
+    const [contact] = await sql`SELECT id FROM contacts WHERE id = ${req.params.id} AND client_id = ${req.user.sub}`
+    if (!contact) return reply.code(404).send({ error: 'Contacto no encontrado' })
+
+    const existing = await sql`SELECT COUNT(*) FROM contact_emails WHERE contact_id = ${req.params.id}`
+    const isFirst  = parseInt(existing[0].count) === 0
+
+    const [ce] = await sql`
+      INSERT INTO contact_emails (contact_id, client_id, email, label, is_primary)
+      VALUES (${req.params.id}, ${req.user.sub}, ${email}, ${label}, ${isFirst})
+      ON CONFLICT (contact_id, email) DO NOTHING
+      RETURNING *
+    `
+    if (isFirst) await sql`UPDATE contacts SET email = ${email} WHERE id = ${req.params.id}`
+    return reply.code(201).send(ce)
+  })
+
+  fastify.delete('/contacts/:id/emails/:emailId', auth, async (req, reply) => {
+    const [ce] = await sql`
+      SELECT * FROM contact_emails WHERE id = ${req.params.emailId} AND contact_id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!ce) return reply.code(404).send({ error: 'Email no encontrado' })
+
+    await sql`DELETE FROM contact_emails WHERE id = ${req.params.emailId}`
+
+    if (ce.is_primary) {
+      const [next] = await sql`SELECT id, email FROM contact_emails WHERE contact_id = ${req.params.id} ORDER BY created_at LIMIT 1`
+      if (next) {
+        await sql`UPDATE contact_emails SET is_primary = true WHERE id = ${next.id}`
+        await sql`UPDATE contacts SET email = ${next.email} WHERE id = ${req.params.id}`
+      } else {
+        await sql`UPDATE contacts SET email = null WHERE id = ${req.params.id}`
+      }
+    }
+    return { deleted: true }
+  })
+
+  fastify.patch('/contacts/:id/emails/:emailId/primary', auth, async (req, reply) => {
+    const [ce] = await sql`
+      SELECT * FROM contact_emails WHERE id = ${req.params.emailId} AND contact_id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!ce) return reply.code(404).send({ error: 'Email no encontrado' })
+
+    await sql`UPDATE contact_emails SET is_primary = false WHERE contact_id = ${req.params.id}`
+    await sql`UPDATE contact_emails SET is_primary = true  WHERE id = ${req.params.emailId}`
+    await sql`UPDATE contacts SET email = ${ce.email} WHERE id = ${req.params.id}`
+    return { ok: true }
   })
 
   fastify.delete('/lists/:listId/contacts/:contactId', auth, async (req, reply) => {

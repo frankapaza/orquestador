@@ -281,6 +281,101 @@ function TimelineItem({ event }) {
   )
 }
 
+const LABELS = ['Principal', 'Trabajo', 'Casa', 'Celular', 'Otro']
+
+function ChannelList({ contactId, items, type, onRefresh }) {
+  const [adding, setAdding]   = useState(false)
+  const [value, setValue]     = useState('')
+  const [label, setLabel]     = useState('Principal')
+  const [saving, setSaving]   = useState(false)
+  const [error, setError]     = useState(null)
+
+  const isPhone = type === 'phones'
+  const apiBase = isPhone ? 'phones' : 'emails'
+
+  async function add(e) {
+    e.preventDefault()
+    setSaving(true); setError(null)
+    try {
+      await api.post(`/contacts/${contactId}/${apiBase}`, { [isPhone ? 'phone' : 'email']: value, label })
+      setValue(''); setLabel('Principal'); setAdding(false)
+      onRefresh()
+    } catch (err) { setError(err.response?.data?.error ?? err.message) }
+    finally { setSaving(false) }
+  }
+
+  async function remove(itemId) {
+    if (!confirm('¿Eliminar?')) return
+    await api.delete(`/contacts/${contactId}/${apiBase}/${itemId}`)
+    onRefresh()
+  }
+
+  async function setPrimary(itemId) {
+    await api.patch(`/contacts/${contactId}/${apiBase}/${itemId}/primary`)
+    onRefresh()
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          {isPhone ? 'Teléfonos' : 'Emails'}
+        </p>
+        <button onClick={() => setAdding(a => !a)}
+          className="text-xs text-blue-600 hover:text-blue-700 font-medium">
+          + Agregar
+        </button>
+      </div>
+
+      <div className="space-y-1.5">
+        {(items ?? []).map(item => (
+          <div key={item.id} className="flex items-center gap-2 group">
+            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${item.is_primary ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+              {item.label}
+            </span>
+            <span className="text-sm text-gray-800 flex-1 truncate">
+              {isPhone ? item.phone : item.email}
+            </span>
+            <div className="hidden group-hover:flex items-center gap-1">
+              {!item.is_primary && (
+                <button onClick={() => setPrimary(item.id)} title="Marcar como principal"
+                  className="text-xs text-blue-500 hover:text-blue-700">★</button>
+              )}
+              <button onClick={() => remove(item.id)} title="Eliminar"
+                className="text-xs text-red-400 hover:text-red-600">×</button>
+            </div>
+          </div>
+        ))}
+        {(!items || items.length === 0) && (
+          <p className="text-xs text-gray-400">Sin {isPhone ? 'teléfonos' : 'emails'} registrados</p>
+        )}
+      </div>
+
+      {adding && (
+        <form onSubmit={add} className="mt-2 flex gap-2 flex-wrap">
+          <input value={value} onChange={e => setValue(e.target.value)} required
+            placeholder={isPhone ? '+51999...' : 'correo@ejemplo.com'}
+            type={isPhone ? 'tel' : 'email'}
+            className="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none" />
+          <select value={label} onChange={e => setLabel(e.target.value)}
+            className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-white">
+            {LABELS.map(l => <option key={l}>{l}</option>)}
+          </select>
+          <button type="submit" disabled={saving}
+            className="bg-blue-600 text-white text-xs px-3 py-1.5 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            {saving ? '...' : 'Guardar'}
+          </button>
+          <button type="button" onClick={() => { setAdding(false); setError(null) }}
+            className="text-xs text-gray-500 hover:text-gray-700 px-2">
+            Cancelar
+          </button>
+          {error && <p className="w-full text-xs text-red-600">{error}</p>}
+        </form>
+      )}
+    </div>
+  )
+}
+
 export default function Contact360Page() {
   const { id }  = useParams()
   const router  = useRouter()
@@ -289,12 +384,14 @@ export default function Contact360Page() {
   const [filter, setFilter]   = useState('all')
   const [showSend, setShowSend] = useState(false)
 
-  useEffect(() => {
+  function load() {
     api.get(`/contacts/${id}/360`)
       .then(r => setData(r.data))
       .catch(() => router.push('/dashboard/contacts'))
       .finally(() => setLoading(false))
-  }, [id])
+  }
+
+  useEffect(() => { load() }, [id])
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -329,19 +426,7 @@ export default function Contact360Page() {
           </div>
           <div className="flex-1 min-w-0">
             <h1 className="text-2xl font-bold text-gray-900">{name}</h1>
-            <div className="flex flex-wrap gap-3 mt-2">
-              {contact.phone && (
-                <span className="flex items-center gap-1 text-sm text-gray-600">
-                  <Smartphone size={14} /> {contact.phone}
-                </span>
-              )}
-              {contact.email && (
-                <span className="flex items-center gap-1 text-sm text-gray-600">
-                  <Mail size={14} /> {contact.email}
-                </span>
-              )}
-            </div>
-            <div className="flex flex-wrap gap-2 mt-3">
+            <div className="flex flex-wrap gap-2 mt-2">
               {(contact.lists ?? []).map(l => (
                 <span key={l.id} className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
                   {l.name}
@@ -354,11 +439,16 @@ export default function Contact360Page() {
               )}
             </div>
           </div>
-          {/* Acción principal */}
           <button onClick={() => setShowSend(true)}
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white text-sm rounded-xl hover:bg-blue-700 font-semibold flex-shrink-0">
             <Send size={14} /> Enviar mensaje
           </button>
+        </div>
+
+        {/* Teléfonos y emails gestionables */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-5 pt-5 border-t border-gray-100">
+          <ChannelList contactId={id} items={contact.phones} type="phones" onRefresh={load} />
+          <ChannelList contactId={id} items={contact.emails} type="emails" onRefresh={load} />
         </div>
       </div>
 
