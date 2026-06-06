@@ -133,7 +133,7 @@ export async function docsRoutes(fastify) {
         ]),
 
         // ── 2. CONTACTOS ───────────────────────────────────────────────────
-        folder('2. Contactos', 'Gestiona listas y contactos. Cada contacto puede tener email, teléfono o ambos.', [
+        folder('2. Contactos', 'Gestiona listas y contactos. Cada contacto puede tener múltiples teléfonos y emails con etiquetas.', [
           {
             name: 'Listar listas',
             method: 'GET',
@@ -156,19 +156,57 @@ export async function docsRoutes(fastify) {
             method: 'POST',
             url: '{{base_url}}/lists/ID_DE_LA_LISTA/contacts',
             body: { email: 'juan@empresa.com', phone: '+51910462070', first_name: 'Juan', last_name: 'Pérez' },
-            description: 'Al menos email o phone es obligatorio.',
+            description: 'Al menos email o phone es obligatorio. Los teléfonos y emails adicionales se agregan después con los endpoints de phones/emails.',
           },
           {
             name: 'Buscar contacto',
             method: 'GET',
             url: '{{base_url}}/contacts/search?q=juan&limit=10',
-            description: 'Busca por nombre, email o teléfono. Útil para autocompletado.',
+            description: 'Busca por nombre, email o teléfono. Ahora también busca en todos los teléfonos y emails adicionales del contacto.',
           },
           {
             name: 'Vista 360° del contacto',
             method: 'GET',
             url: '{{base_url}}/contacts/ID_DEL_CONTACTO/360',
-            description: 'Devuelve historial completo: emails enviados, mensajes WA/SMS y línea de tiempo cronológica.',
+            description: 'Devuelve historial completo. Incluye phones[] y emails[] con todos los teléfonos/emails del contacto y su etiqueta (Principal, Trabajo, Casa, etc.).',
+          },
+          {
+            name: 'Agregar teléfono al contacto',
+            method: 'POST',
+            url: '{{base_url}}/contacts/ID_DEL_CONTACTO/phones',
+            body: { phone: '+51999123456', label: 'Trabajo' },
+            description: 'label puede ser: Principal, Trabajo, Casa, Celular, Otro. El primer teléfono queda automáticamente como primario y actualiza contacts.phone.',
+          },
+          {
+            name: 'Marcar teléfono como principal',
+            method: 'PATCH',
+            url: '{{base_url}}/contacts/ID_DEL_CONTACTO/phones/ID_DEL_TELEFONO/primary',
+            description: 'El teléfono marcado como primario es el que aparece en el inbox y se usa al enviar mensajes.',
+          },
+          {
+            name: 'Eliminar teléfono',
+            method: 'DELETE',
+            url: '{{base_url}}/contacts/ID_DEL_CONTACTO/phones/ID_DEL_TELEFONO',
+            description: 'Si era el primario, el siguiente teléfono disponible queda como primario automáticamente.',
+          },
+          {
+            name: 'Agregar email al contacto',
+            method: 'POST',
+            url: '{{base_url}}/contacts/ID_DEL_CONTACTO/emails',
+            body: { email: 'juan.trabajo@empresa.com', label: 'Trabajo' },
+            description: 'Mismos labels que teléfonos. El primero queda como primario automáticamente.',
+          },
+          {
+            name: 'Marcar email como principal',
+            method: 'PATCH',
+            url: '{{base_url}}/contacts/ID_DEL_CONTACTO/emails/ID_DEL_EMAIL/primary',
+            description: 'El email marcado como primario es el que se usa para envíos y campañas.',
+          },
+          {
+            name: 'Eliminar email',
+            method: 'DELETE',
+            url: '{{base_url}}/contacts/ID_DEL_CONTACTO/emails/ID_DEL_EMAIL',
+            description: 'Si era el primario, el siguiente email disponible queda como primario automáticamente.',
           },
         ]),
 
@@ -282,7 +320,47 @@ export async function docsRoutes(fastify) {
           },
         ]),
 
-        // ── 6. VISTA DEL ASESOR ────────────────────────────────────────────
+        // ── 6. SMS ────────────────────────────────────────────────────────
+        folder('6. SMS — Android Gateway', 'Envía SMS usando un celular Android como gateway. Obtén el account_id de GET /sms/accounts y úsalo en POST /messages/send con channel:"sms".', [
+          {
+            name: 'Listar cuentas SMS (obtener account_id)',
+            method: 'GET',
+            url: '{{base_url}}/sms/accounts',
+            description: 'Devuelve todas las cuentas SMS configuradas. El campo "id" de cada cuenta es el account_id que debes usar en POST /messages/send con channel:"sms". Igual que WhatsApp pero para SMS.',
+          },
+          {
+            name: 'Crear cuenta SMS (modo cloud)',
+            method: 'POST',
+            url: '{{base_url}}/sms/accounts',
+            body: {
+              name:               'Mi celular',
+              phone_number:       '+51910462070',
+              gateway_url:        'https://api.sms-gate.app',
+              api_key:            'usuario:contraseña',
+              daily_limit:        100,
+              delay_min:          5,
+              delay_max:          15,
+              active_hours_start: '08:00',
+              active_hours_end:   '20:00',
+            },
+            description: 'MODO CLOUD: Instala "Android SMS Gateway" en tu celular → crea cuenta en sms-gate.app → pon tus credenciales en api_key como "usuario:contraseña". MODO LOCAL: cambia gateway_url por la IP del celular (ej: http://192.168.1.5:8080) y pon el Bearer token de la app en api_key.',
+          },
+          {
+            name: 'Verificar gateway online',
+            method: 'GET',
+            url: '{{base_url}}/sms/accounts/ID_CUENTA_SMS/ping',
+            description: 'Verifica si el celular Android está online. Devuelve { online: true/false }.',
+          },
+          {
+            name: 'Enviar SMS',
+            method: 'POST',
+            url: '{{base_url}}/messages/send',
+            body: { channel: 'sms', account_id: 'ID_CUENTA_SMS', to: '+51910462070', message: 'Hola desde Kubo!' },
+            description: 'Usa el "id" obtenido de GET /sms/accounts como account_id. El mensaje se envía desde el celular Android configurado.',
+          },
+        ]),
+
+        // ── 7. VISTA DEL ASESOR ────────────────────────────────────────────
         {
           name: '6. Vista del Asesor (usar {{token_asesor}})',
           description: 'Estos endpoints usan el token del asesor. El filtrado es automático: solo devuelve conversaciones y canales asignados a ese asesor. Primero ejecuta "Login Asesor" para obtener {{token_asesor}}.',
