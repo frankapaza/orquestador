@@ -27,7 +27,7 @@ const SECTIONS = [
   },
   {
     id: 'contacts', icon: '👥', title: 'Contactos',
-    description: 'Gestiona listas y contactos. Cada contacto puede tener email, teléfono o ambos.',
+    description: 'Gestiona listas y contactos. Cada contacto puede tener múltiples teléfonos y emails con etiquetas.',
     endpoints: [
       {
         method: 'GET', path: '/lists',
@@ -38,7 +38,7 @@ const SECTIONS = [
         method: 'POST', path: '/lists',
         title: 'Crear lista',
         body: { name: 'Clientes CRM', description: 'Importados desde mi sistema' },
-        response: { id: '...', name: 'Clientes CRM', created_at: '2026-06-05...' },
+        response: { id: '...', name: 'Clientes CRM', created_at: '2026-06-06...' },
       },
       {
         method: 'GET', path: '/lists/:listId/contacts?page=1&limit=50',
@@ -52,21 +52,62 @@ const SECTIONS = [
         title: 'Agregar contacto',
         params: [{ name: 'listId', desc: 'ID de la lista' }],
         body: { email: 'juan@empresa.com', phone: '+51910462070', first_name: 'Juan', last_name: 'Pérez' },
-        note: 'Al menos email o phone es obligatorio. Puedes enviar solo uno de los dos.',
+        note: 'Al menos email o phone es obligatorio. Los teléfonos y emails adicionales se agregan con los endpoints /contacts/:id/phones y /contacts/:id/emails.',
         response: { id: '...', email: 'juan@empresa.com', phone: '+51910462070' },
       },
       {
         method: 'GET', path: '/contacts/search?q=juan&limit=10',
         title: 'Buscar contacto',
-        query: [{ name: 'q', desc: 'Texto a buscar (nombre, email o teléfono)' }],
+        query: [{ name: 'q', desc: 'Texto a buscar (nombre, email o teléfono — busca en todos los teléfonos y emails del contacto)' }],
         response: [{ id: '...', first_name: 'Juan', phone: '+51910462070', list_name: 'Clientes CRM' }],
       },
       {
         method: 'GET', path: '/contacts/:id/360',
         title: 'Vista 360° — historial completo',
         params: [{ name: 'id', desc: 'ID del contacto' }],
-        description: 'Devuelve datos del contacto + estadísticas por canal + línea de tiempo cronológica de emails, WA y SMS.',
-        response: { contact: { id: '...', first_name: 'Juan', email: '...', phone: '...' }, stats: { email: { total_sent: 3, opens: 1 }, messages: { whatsapp: 5, sms: 2 } }, timeline: ['...'] },
+        description: 'Devuelve datos del contacto incluyendo todos sus teléfonos y emails, estadísticas por canal y línea de tiempo cronológica.',
+        response: { contact: { id: '...', first_name: 'Juan', phones: [{ phone: '+51999...', label: 'Principal', is_primary: true }], emails: [{ email: 'juan@...', label: 'Trabajo', is_primary: false }] }, stats: { email: { total_sent: 3, opens: 1 }, messages: { whatsapp: 5, sms: 2 } }, timeline: ['...'] },
+      },
+      {
+        method: 'POST', path: '/contacts/:id/phones',
+        title: 'Agregar teléfono al contacto',
+        params: [{ name: 'id', desc: 'ID del contacto' }],
+        body: { phone: '+51999123456', label: 'Trabajo' },
+        note: 'label puede ser: Principal, Trabajo, Casa, Celular, Otro. El primer teléfono queda automáticamente como primario.',
+        response: { id: '...', phone: '+51999123456', label: 'Trabajo', is_primary: false },
+      },
+      {
+        method: 'PATCH', path: '/contacts/:id/phones/:phoneId/primary',
+        title: 'Marcar teléfono como principal',
+        params: [{ name: 'id', desc: 'ID del contacto' }, { name: 'phoneId', desc: 'ID del teléfono' }],
+        response: { ok: true },
+      },
+      {
+        method: 'DELETE', path: '/contacts/:id/phones/:phoneId',
+        title: 'Eliminar teléfono',
+        params: [{ name: 'id', desc: 'ID del contacto' }, { name: 'phoneId', desc: 'ID del teléfono' }],
+        note: 'Si era el primario, el siguiente teléfono disponible queda como primario automáticamente.',
+        response: { deleted: true },
+      },
+      {
+        method: 'POST', path: '/contacts/:id/emails',
+        title: 'Agregar email al contacto',
+        params: [{ name: 'id', desc: 'ID del contacto' }],
+        body: { email: 'juan.trabajo@empresa.com', label: 'Trabajo' },
+        note: 'Mismos labels que teléfonos. El primero queda como primario automáticamente.',
+        response: { id: '...', email: 'juan.trabajo@empresa.com', label: 'Trabajo', is_primary: false },
+      },
+      {
+        method: 'PATCH', path: '/contacts/:id/emails/:emailId/primary',
+        title: 'Marcar email como principal',
+        params: [{ name: 'id', desc: 'ID del contacto' }, { name: 'emailId', desc: 'ID del email' }],
+        response: { ok: true },
+      },
+      {
+        method: 'DELETE', path: '/contacts/:id/emails/:emailId',
+        title: 'Eliminar email',
+        params: [{ name: 'id', desc: 'ID del contacto' }, { name: 'emailId', desc: 'ID del email' }],
+        response: { deleted: true },
       },
     ],
   },
@@ -173,7 +214,40 @@ const SECTIONS = [
     ],
   },
   {
-    id: 'webhooks', icon: '🔗', title: 'Webhooks — Recibir eventos en tu CRM',
+    id: 'sms', icon: '📱', title: 'SMS — Android Gateway',
+    description: 'Kubo envía SMS usando Android SMS Gateway. Puedes conectar un teléfono Android en modo cloud (api.sms-gate.app) o en modo local (IP de red).',
+    endpoints: [
+      {
+        method: 'GET', path: '/sms/accounts',
+        title: 'Listar cuentas SMS',
+        description: 'Devuelve las cuentas configuradas con su ID, estado online y cuota diaria. El ID es el que usas en POST /messages/send con channel: "sms".',
+        response: [{ id: '...', name: 'Celular Frank', phone_number: '+51910462070', is_online: true, sent_today: 5, daily_limit: 100 }],
+      },
+      {
+        method: 'POST', path: '/sms/accounts',
+        title: 'Crear cuenta SMS (modo cloud)',
+        body: { name: 'Mi celular', phone_number: '+51910462070', gateway_url: 'https://api.sms-gate.app', api_key: 'usuario:contraseña', daily_limit: 100, delay_min: 5, delay_max: 15, active_hours_start: '08:00', active_hours_end: '20:00' },
+        note: 'MODO CLOUD: Instala Android SMS Gateway app → crea cuenta en sms-gate.app → usa tus credenciales como api_key en formato "usuario:contraseña". MODO LOCAL: usa la IP del teléfono como gateway_url (ej: http://192.168.1.5:8080) y el Bearer token de la app como api_key.',
+        response: { id: '...', name: 'Mi celular', is_online: true },
+      },
+      {
+        method: 'GET', path: '/sms/accounts/:id/ping',
+        title: 'Verificar estado del gateway',
+        params: [{ name: 'id', desc: 'ID de la cuenta SMS' }],
+        description: 'Comprueba si el teléfono Android está online y puede enviar mensajes.',
+        response: { online: true },
+      },
+      {
+        method: 'POST', path: '/messages/send',
+        title: 'Enviar SMS',
+        body: { channel: 'sms', account_id: 'ID_CUENTA_SMS', to: '+51910462070', message: 'Hola desde Kubo!' },
+        note: 'Usa el ID obtenido de GET /sms/accounts. El mensaje se envía desde el teléfono Android configurado.',
+        response: { message: { id: '...', status: 'sent', channel: 'sms' }, conversation: { id: '...', contact_phone: '+51910462070' } },
+      },
+    ],
+  },
+  {
+    id: 'webhooks', icon: '🔗', title: 'Webhooks — Recibir eventos',
     description: 'Configura una URL en tu CRM para recibir notificaciones en tiempo real cuando llegan mensajes.',
     endpoints: [
       {
