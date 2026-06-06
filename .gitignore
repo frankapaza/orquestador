@@ -1,0 +1,26 @@
+node_modules
+.next
+dist
+*.log
+.DS_Store
+Thumbs.db
+
+# Variables de entorno (nunca al repo)
+.env
+.env.local
+.env.production
+apps/api/.env
+apps/web/.env.local
+
+# Sesiones de WhatsApp (credenciales de dispositivo)
+apps/api/sessions/
+
+# Archivos subidos por usuarios
+apps/api/uploads/
+
+# Builds
+apps/web/.next/
+apps/web/out/
+
+# Archivos locales con credenciales
+credenciales.txt

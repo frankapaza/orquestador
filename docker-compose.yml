@@ -1,0 +1,75 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: kubo_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kubo_orquestador
+      POSTGRES_USER: kubo
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-kubo123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U kubo -d kubo_orquestador']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: kubo_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: kubo_api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://kubo:${DB_PASSWORD:-kubo123}@postgres:5432/kubo_orquestador
+      REDIS_URL: redis://redis:6379
+    ports:
+      - '3002:3002'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - sessions_data:/app/sessions
+      - uploads_data:/app/uploads
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3002/api/v1}
+    container_name: kubo_web
+    restart: unless-stopped
+    ports:
+      - '3003:3003'
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:
+  sessions_data:
+  uploads_data:

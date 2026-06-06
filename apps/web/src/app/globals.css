@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Variables de easing (Emil Kowalski) ────────────────────────────────── */
+:root {
+  --ease-out:    cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+/* ── Feedback táctil en botones ─────────────────────────────────────────── */
+/* Todos los botones responden al clic con una escala sutil */
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+a[role="button"]:not(:disabled):active,
+[type="submit"]:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* Añadimos solo transform al transition de botones que ya tienen transition-colors de Tailwind */
+button.transition-colors,
+button.transition-all {
+  transition-property: color, background-color, border-color, transform, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+/* Excepción: botones con loading no deben escalar */
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* ── Modales: entrada suave ─────────────────────────────────────────────── */
+/* El overlay fade */
+.modal-overlay {
+  animation: modal-overlay-in 150ms ease-out forwards;
+}
+@keyframes modal-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* El contenido sube desde abajo y hace fade */
+.modal-content {
+  animation: modal-content-in 200ms var(--ease-out) forwards;
+}
+@keyframes modal-content-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Sidebar: transición específica (no all) ────────────────────────────── */
+.sidebar-transition {
+  transition: width 200ms var(--ease-out);
+}
+
+/* ── Cards de métricas: hover con elevación ─────────────────────────────── */
+.metric-card-hover {
+  transition: transform 150ms ease-out, box-shadow 150ms ease-out;
+}
+.metric-card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px -4px rgba(0,0,0,0.10);
+}
+
+/* ── Progress bar: solo transición de width ────────────────────────────── */
+.progress-bar {
+  transition: width 400ms var(--ease-out);
+}
+
+/* ── Conversación en inbox: hover solo en pointer device ───────────────── */
+@media (hover: hover) and (pointer: fine) {
+  .conv-item:hover {
+    background-color: rgb(249 250 251);
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .modal-content,
+  .modal-overlay,
+  .metric-card-hover {
+    animation: none !important;
+    transition: opacity 100ms ease !important;
+    transform: none !important;
+  }
+}
