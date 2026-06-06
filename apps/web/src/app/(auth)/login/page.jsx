@@ -64,6 +64,9 @@ export default function LoginPage() {
             {loading ? 'Ingresando...' : 'Ingresar'}
           </button>
         </form>
+        <p className="text-center text-xs text-gray-400 mt-6">
+          v1.0.0 · {new Date().toLocaleDateString('es-PE', { year: 'numeric', month: 'long', day: 'numeric' })}
+        </p>
       </div>
     </div>
   )
