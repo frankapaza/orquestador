@@ -76,40 +76,50 @@ fastify.register(incomingWebhooksRoutes)
 
 fastify.get('/health', async () => ({ status: 'ok', env: env.NODE_ENV }))
 
-// Iniciar worker de envio
-startCampaignWorker()
-fastify.log.info('[Worker] Campaign worker iniciado')
+// Procesos de fondo (worker de envios, cron de campanas, sesiones WhatsApp).
+// Se pueden desactivar con DISABLE_WORKERS=true — util al apuntar el entorno
+// local a una BD de produccion para NO disparar envios reales ni tumbar el
+// WhatsApp del servidor. Quitar el flag para tener el comportamiento completo.
+const WORKERS_DISABLED = process.env.DISABLE_WORKERS === 'true'
 
-// Iniciar sesiones Baileys guardadas (con delay para que la DB esté lista)
-setTimeout(() => {
-  baileysManager.initAll().catch(err => fastify.log.error({ err }, '[Baileys] Error al inicializar sesiones'))
-}, 3000)
+if (WORKERS_DISABLED) {
+  fastify.log.warn('[Worker] DISABLE_WORKERS=true → worker de campanas, cron y Baileys DESACTIVADOS (modo solo lectura/API)')
+} else {
+  // Iniciar worker de envio
+  startCampaignWorker()
+  fastify.log.info('[Worker] Campaign worker iniciado')
 
-// Verificar campanas programadas cada minuto
-cron.schedule('* * * * *', async () => {
-  try {
-    const due = await sql`
-      SELECT * FROM campaigns WHERE status = 'scheduled' AND scheduled_at <= now()
-    `
-    for (const campaign of due) {
-      await sql`UPDATE campaigns SET status = 'sending', started_at = now() WHERE id = ${campaign.id}`
-      await enqueueCampaign(campaign)
-      fastify.log.info(`[Cron] Campana programada iniciada: ${campaign.name} (${campaign.id})`)
+  // Iniciar sesiones Baileys guardadas (con delay para que la DB esté lista)
+  setTimeout(() => {
+    baileysManager.initAll().catch(err => fastify.log.error({ err }, '[Baileys] Error al inicializar sesiones'))
+  }, 3000)
+
+  // Verificar campanas programadas cada minuto
+  cron.schedule('* * * * *', async () => {
+    try {
+      const due = await sql`
+        SELECT * FROM campaigns WHERE status = 'scheduled' AND scheduled_at <= now()
+      `
+      for (const campaign of due) {
+        await sql`UPDATE campaigns SET status = 'sending', started_at = now() WHERE id = ${campaign.id}`
+        await enqueueCampaign(campaign)
+        fastify.log.info(`[Cron] Campana programada iniciada: ${campaign.name} (${campaign.id})`)
+      }
+    } catch (err) {
+      fastify.log.error({ err }, '[Cron] Error al verificar campanas programadas')
     }
-  } catch (err) {
-    fastify.log.error({ err }, '[Cron] Error al verificar campanas programadas')
-  }
-})
+  })
 
-// Reset diario de contadores sent_today a medianoche
-cron.schedule('0 0 * * *', async () => {
-  try {
-    const result = await sql`UPDATE email_accounts SET sent_today = 0`
-    fastify.log.info(`[Cron] Contadores diarios reseteados: ${result.count} cuentas`)
-  } catch (err) {
-    fastify.log.error({ err }, '[Cron] Error al resetear contadores diarios')
-  }
-})
+  // Reset diario de contadores sent_today a medianoche
+  cron.schedule('0 0 * * *', async () => {
+    try {
+      const result = await sql`UPDATE email_accounts SET sent_today = 0`
+      fastify.log.info(`[Cron] Contadores diarios reseteados: ${result.count} cuentas`)
+    } catch (err) {
+      fastify.log.error({ err }, '[Cron] Error al resetear contadores diarios')
+    }
+  })
+}
 
 try {
   await fastify.listen({ port: env.PORT, host: '0.0.0.0' })

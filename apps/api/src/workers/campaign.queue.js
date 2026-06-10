@@ -12,28 +12,50 @@ export const campaignQueue = new Queue(QUEUE_NAME, { connection: redis })
 
 export async function enqueueCampaign(campaign) {
   const channel = campaign.channel ?? 'email'
+  // send_to_all: enviar a TODOS los teléfonos/correos del contacto, o solo al principal.
+  const sendAll = campaign.settings?.send_to_all === true
 
-  const contacts = await sql`
-    SELECT c.* FROM contacts c
-    WHERE c.list_id = ${campaign.list_id} AND c.is_subscribed = true
-  `
+  // Una fila por DESTINO (no por contacto): cada teléfono/correo es un envío.
+  let recipients
+  if (channel === 'email') {
+    recipients = await sql`
+      SELECT c.id AS contact_id, ce.email AS recipient_email, NULL::text AS phone_number
+      FROM contacts c
+      JOIN contact_emails ce ON ce.contact_id = c.id ${sendAll ? sql`` : sql`AND ce.is_primary = true`}
+      WHERE c.list_id = ${campaign.list_id} AND c.is_subscribed = true
+        AND ce.email IS NOT NULL AND ce.email <> ''
+    `
+  } else {
+    recipients = await sql`
+      SELECT c.id AS contact_id, NULL::text AS recipient_email,
+             (COALESCE(cp.phone_dial, '') || cp.phone) AS phone_number
+      FROM contacts c
+      JOIN contact_phones cp ON cp.contact_id = c.id ${sendAll ? sql`` : sql`AND cp.is_primary = true`}
+      WHERE c.list_id = ${campaign.list_id} AND c.is_subscribed = true
+        AND cp.phone IS NOT NULL AND cp.phone <> ''
+    `
+  }
 
-  if (contacts.length === 0) {
+  if (recipients.length === 0) {
     await sql`UPDATE campaigns SET status = 'failed', completed_at = now() WHERE id = ${campaign.id}`
     return
   }
 
-  const jobRows = contacts.map(c => ({
+  // total_recipients refleja los destinos reales (un contacto puede aportar varios)
+  await sql`UPDATE campaigns SET total_recipients = ${recipients.length} WHERE id = ${campaign.id}`
+
+  const jobRows = recipients.map(r => ({
     campaign_id:     campaign.id,
-    contact_id:      c.id,
-    recipient_email: c.email,
+    contact_id:      r.contact_id,
+    recipient_email: r.recipient_email,
+    phone_number:    r.phone_number,
     channel,
     status:          'pending',
   }))
 
   await sql`
-    INSERT INTO campaign_jobs ${sql(jobRows, 'campaign_id', 'contact_id', 'recipient_email', 'channel', 'status')}
-    ON CONFLICT (campaign_id, contact_id) DO NOTHING
+    INSERT INTO campaign_jobs ${sql(jobRows, 'campaign_id', 'contact_id', 'recipient_email', 'phone_number', 'channel', 'status')}
+    ON CONFLICT DO NOTHING
   `
 
   const settings = campaign.settings ?? {}
@@ -42,9 +64,9 @@ export async function enqueueCampaign(campaign) {
   const delayMin = settings.delay_min_ms ?? (isMessaging ? 8000  : 2000)
   const delayMax = settings.delay_max_ms ?? (isMessaging ? 25000 : 15000)
 
-  const jobs = contacts.map((contact, index) => ({
+  const jobs = recipients.map((r, index) => ({
     name: `send-${channel}`,
-    data: { campaign_id: campaign.id, contact_id: contact.id, channel },
+    data: { campaign_id: campaign.id, contact_id: r.contact_id, channel, recipient_email: r.recipient_email, phone_number: r.phone_number },
     opts: {
       delay:            index * Math.floor(Math.random() * (delayMax - delayMin) + delayMin),
       attempts:         3,
@@ -61,21 +83,29 @@ export function startCampaignWorker() {
   const worker = new Worker(
     QUEUE_NAME,
     async (job) => {
-      const { campaign_id, contact_id } = job.data
+      const { campaign_id, contact_id, recipient_email, phone_number } = job.data
 
       const [campaign] = await sql`SELECT * FROM campaigns WHERE id = ${campaign_id}`
       if (!campaign || campaign.status === 'paused') return { skipped: true }
+
+      // Identifica el job exacto de este destino (un contacto puede tener varios).
+      const destMatch = sql`AND COALESCE(recipient_email,'') = ${recipient_email ?? ''} AND COALESCE(phone_number,'') = ${phone_number ?? ''}`
 
       const [contact] = await sql`SELECT * FROM contacts WHERE id = ${contact_id}`
       if (!contact || !contact.is_subscribed) {
         await sql`
           UPDATE campaign_jobs SET status = 'failed', error_message = 'contacto dado de baja'
-          WHERE campaign_id = ${campaign_id} AND contact_id = ${contact_id}
+          WHERE campaign_id = ${campaign_id} AND contact_id = ${contact_id} ${destMatch}
         `
         return { skipped: true }
       }
 
       const channel = job.data.channel ?? campaign.channel ?? 'email'
+      // El destino de este job concreto (uno de los teléfonos/correos del contacto).
+      const sendContact = channel === 'email'
+        ? { ...contact, email: recipient_email ?? contact.email }
+        : { ...contact, phone: phone_number, phone_dial: '' }
+
       let messageId = null
       let accountId = null
 
@@ -83,14 +113,14 @@ export function startCampaignWorker() {
         // ── WhatsApp via Evolution API (round-robin) ─────────────────
         const account = await pickWhatsappAccount(campaign.client_id)
         if (!account) throw new Error('No hay cuentas WhatsApp disponibles con cuota')
-        messageId = await sendWhatsapp({ campaign, contact, account })
+        messageId = await sendWhatsapp({ campaign, contact: sendContact, account })
         accountId = account.id
 
       } else if (channel === 'sms') {
         // ── SMS via Android Gateway (round-robin) ────────────────────
         const account = await pickSmsAccount(campaign.client_id)
         if (!account) throw new Error('No hay cuentas SMS disponibles con cuota')
-        messageId = await sendSms({ campaign, contact, account })
+        messageId = await sendSms({ campaign, contact: sendContact, account })
         accountId = account.id
 
       } else if (campaign.strategy === 'smtp_own') {
@@ -98,7 +128,7 @@ export function startCampaignWorker() {
         const account = await pickEmailAccount(campaign.client_id)
         if (!account) throw new Error('No hay cuentas SMTP disponibles con cuota')
         messageId = await sendOneEmail({
-          campaign, contact, account,
+          campaign, contact: sendContact, account,
           trackingBaseUrl: env.TRACKING_BASE_URL,
         })
         accountId = account.id
@@ -107,7 +137,7 @@ export function startCampaignWorker() {
         // ── Proveedor externo (SendGrid, Brevo, Mailchimp) ───────────
         const adapter = await getAdapterForCampaign(campaign)
         const result  = await adapter.send({
-          campaign, contact,
+          campaign, contact: sendContact,
           trackingBaseUrl: env.TRACKING_BASE_URL,
         })
         messageId = result.messageId
@@ -118,7 +148,7 @@ export function startCampaignWorker() {
         SET status = 'sent', message_id = ${messageId},
             email_account_id = ${channel === 'email' ? accountId : null},
             account_id = ${accountId}, channel = ${channel}, sent_at = now()
-        WHERE campaign_id = ${campaign_id} AND contact_id = ${contact_id}
+        WHERE campaign_id = ${campaign_id} AND contact_id = ${contact_id} ${destMatch}
       `
       await sql`UPDATE campaigns SET sent_count = sent_count + 1 WHERE id = ${campaign_id}`
 
@@ -129,10 +159,11 @@ export function startCampaignWorker() {
 
   worker.on('failed', async (job, err) => {
     if (!job) return
-    const { campaign_id, contact_id } = job.data
+    const { campaign_id, contact_id, recipient_email, phone_number } = job.data
     await sql`
       UPDATE campaign_jobs SET status = 'failed', error_message = ${err.message}
       WHERE campaign_id = ${campaign_id} AND contact_id = ${contact_id}
+        AND COALESCE(recipient_email,'') = ${recipient_email ?? ''} AND COALESCE(phone_number,'') = ${phone_number ?? ''}
     `
     await sql`UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ${campaign_id}`
   })

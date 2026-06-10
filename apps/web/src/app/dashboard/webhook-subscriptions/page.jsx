@@ -4,7 +4,15 @@ import api from '../../../lib/api'
 import { PageHeader } from '../../../components/ui/PageHeader'
 import { GuidePanel } from '../../../components/ui/GuidePanel'
 import { HelpTooltip } from '../../../components/ui/HelpTooltip'
-import { Webhook, RefreshCw, Plus, Save, AlertTriangle } from '../../../components/ui/icons'
+import { SectionCard } from '../../../components/ui/section-card'
+import { EmptyState } from '../../../components/ui/empty-state'
+import { Button } from '../../../components/ui/button'
+import { Input } from '../../../components/ui/input'
+import { Checkbox } from '../../../components/ui/checkbox'
+import {
+  Webhook, RefreshCw, Plus, Save, AlertTriangle,
+  ChevronDown, ChevronUp, FileText, CheckCircle, XCircle,
+} from '../../../components/ui/icons'
 
 const ALL_EVENTS = [
   { value: 'message.received',  label: 'Mensaje recibido',   desc: 'Cuando un contacto te escribe por WA o SMS' },
@@ -108,16 +116,15 @@ export default function WebhookSubscriptionsPage() {
   }
 
   return (
-    <div>
+    <div className="mx-auto max-w-7xl space-y-6">
       <PageHeader
         icon={Webhook}
         title="Webhooks"
         description="Notifica a tu CRM u otros sistemas cuando ocurren eventos en tiempo real"
         action={
-          <button onClick={() => setShowForm(true)}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2">
-            <Plus size={14} /> Nueva suscripción
-          </button>
+          <Button onClick={() => setShowForm(true)}>
+            <Plus size={16} strokeWidth={2} /> Nueva suscripción
+          </Button>
         }
       />
 
@@ -128,18 +135,24 @@ export default function WebhookSubscriptionsPage() {
       />
 
       {/* Ejemplo de payload */}
-      <div className="bg-gray-900 rounded-xl mb-6 overflow-hidden">
+      <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
         <button
           onClick={() => setShowPayload(o => !o)}
-          className="w-full flex items-center justify-between px-5 py-3 text-left">
-          <div className="flex items-center gap-2">
-            <span className="text-green-400">{'{ }'}</span>
-            <span className="text-sm font-medium text-gray-300">Ejemplo de payload JSON que recibirá tu CRM</span>
+          className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-muted/40">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-jungle-green-50 text-jungle-green-600">
+              <FileText size={16} strokeWidth={2} />
+            </span>
+            <span className="text-sm font-medium text-foreground">Ejemplo de payload JSON que recibirá tu CRM</span>
           </div>
-          <span className="text-gray-500 text-xs">{showPayload ? '▲ Ocultar' : '▼ Ver ejemplo'}</span>
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            {showPayload
+              ? <><ChevronUp size={14} strokeWidth={2} /> Ocultar</>
+              : <><ChevronDown size={14} strokeWidth={2} /> Ver ejemplo</>}
+          </span>
         </button>
         {showPayload && (
-          <pre className="px-5 pb-5 text-xs text-green-300 overflow-x-auto border-t border-gray-800 pt-4">
+          <pre className="overflow-x-auto border-t bg-muted/40 px-5 py-4 text-xs leading-relaxed text-foreground">
             {PAYLOAD_EXAMPLE}
           </pre>
         )}
@@ -147,86 +160,96 @@ export default function WebhookSubscriptionsPage() {
 
       {/* Modal crear suscripción */}
       {showForm && (
-        <div className="modal-overlay fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-y-auto max-h-[90vh]">
-            <div className="p-6 border-b border-gray-100">
-              <h2 className="text-lg font-semibold">Nueva suscripción de webhook</h2>
-              <p className="text-sm text-gray-500 mt-1">Kubo hará un POST a tu URL cuando ocurran los eventos seleccionados.</p>
+        <div className="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-card shadow-lg">
+            <div className="border-b px-6 py-5">
+              <h2 className="text-base font-semibold text-foreground">Nueva suscripción de webhook</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Kubo hará un POST a tu URL cuando ocurran los eventos seleccionados.</p>
             </div>
             {error && (
-              <div className="mx-6 mt-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-lg">{error}</div>
+              <div className="mx-6 mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                <AlertTriangle size={16} strokeWidth={2} className="shrink-0" /> {error}
+              </div>
             )}
-            <form onSubmit={submit} className="p-6 space-y-4">
-              <div>
-                <label className="text-xs font-semibold text-gray-700">
+            <form onSubmit={submit} className="space-y-5 p-6">
+              <div className="space-y-1.5">
+                <label className="flex items-center text-xs font-semibold text-foreground">
                   Nombre <HelpTooltip text="Nombre descriptivo para identificar este webhook. Ej: 'CRM Principal' o 'Power BI'" />
                 </label>
-                <input
+                <Input
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
                   required placeholder="Ej: CRM C# Producción"
-                  className="mt-1.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0"
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-gray-700 flex items-center">
+              <div className="space-y-1.5">
+                <label className="flex items-center text-xs font-semibold text-foreground">
                   URL del endpoint <HelpTooltip text="URL completa donde Kubo enviará los eventos. Debe ser accesible desde internet y aceptar POST con JSON." />
                 </label>
-                <input
+                <Input
                   value={form.url}
                   onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
                   required type="url" placeholder="https://tucrm.com/api/kubo/webhook"
-                  className="mt-1.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0"
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-gray-700 flex items-center">
+              <div className="space-y-1.5">
+                <label className="flex items-center text-xs font-semibold text-foreground">
                   Secret (opcional) <HelpTooltip text="Clave secreta para verificar que el webhook viene de Kubo. Se enviará como HMAC-SHA256 en el header X-Kubo-Signature." />
                 </label>
-                <input
+                <Input
                   value={form.secret}
                   onChange={e => setForm(f => ({ ...f, secret: e.target.value }))}
                   type="password" placeholder="Dejar vacío si no necesitas verificación de firma"
-                  className="mt-1.5 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  className="h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-gray-700 flex items-center mb-2">
+                <label className="mb-2 flex items-center text-xs font-semibold text-foreground">
                   Eventos a suscribir <HelpTooltip text="Selecciona qué eventos quieres recibir. Solo se enviarán notificaciones de los eventos marcados." />
                 </label>
-                <div className="space-y-2 bg-gray-50 rounded-xl p-3">
-                  {ALL_EVENTS.map(ev => (
-                    <label key={ev.value} className="flex items-start gap-3 cursor-pointer group">
-                      <input
-                        type="checkbox"
-                        checked={form.events.includes(ev.value)}
-                        onChange={() => toggleEvent(ev.value)}
-                        className="mt-0.5 rounded border-gray-300 text-blue-600"
-                      />
-                      <div>
-                        <p className="text-sm font-medium text-gray-800 group-hover:text-blue-700">{ev.label}</p>
-                        <p className="text-xs text-gray-400">{ev.desc}</p>
-                      </div>
-                    </label>
-                  ))}
+                <div className="space-y-1 rounded-xl bg-muted/40 p-2">
+                  {ALL_EVENTS.map(ev => {
+                    const checked = form.events.includes(ev.value)
+                    return (
+                      <label
+                        key={ev.value}
+                        className="flex cursor-pointer items-start gap-3 rounded-lg p-2.5 transition-colors hover:bg-background">
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => toggleEvent(ev.value)}
+                          className="mt-0.5"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-foreground">{ev.label}</p>
+                          <p className="text-xs text-muted-foreground">{ev.desc}</p>
+                        </div>
+                      </label>
+                    )
+                  })}
                 </div>
                 {form.events.length === 0 && (
-                  <p className="text-xs text-amber-600 mt-1 flex items-center gap-1"><AlertTriangle size={12} /> Selecciona al menos un evento</p>
+                  <p className="mt-1.5 flex items-center gap-1 text-xs text-amber-600">
+                    <AlertTriangle size={12} strokeWidth={2} /> Selecciona al menos un evento
+                  </p>
                 )}
               </div>
 
-              <div className="flex gap-3 pt-2">
-                <button type="submit" disabled={loading}
-                  className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
-                  {loading ? 'Guardando...' : <><Save size={14} /> Guardar suscripción</>}
-                </button>
-                <button type="button" onClick={() => { setShowForm(false); setError(null); setForm(EMPTY) }}
-                  className="flex-1 border border-gray-300 py-2.5 rounded-xl text-sm text-gray-700 hover:bg-gray-50">
+              <div className="flex gap-3 pt-1">
+                <Button type="submit" disabled={loading} className="flex-1">
+                  {loading ? 'Guardando...' : <><Save size={16} strokeWidth={2} /> Guardar suscripción</>}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => { setShowForm(false); setError(null); setForm(EMPTY) }}>
                   Cancelar
-                </button>
+                </Button>
               </div>
             </form>
           </div>
@@ -234,25 +257,27 @@ export default function WebhookSubscriptionsPage() {
       )}
 
       {/* Lista de suscripciones */}
-      <div className="space-y-3">
+      <div className="space-y-4">
         {subs.map(sub => (
-          <div key={sub.id} className={`bg-white rounded-xl border-2 p-5 ${sub.is_active ? 'border-gray-200' : 'border-gray-100 opacity-60'}`}>
+          <div
+            key={sub.id}
+            className={`rounded-xl border bg-card p-5 shadow-sm transition-opacity ${sub.is_active ? '' : 'opacity-60'}`}>
             <div className="flex items-start justify-between gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="font-semibold text-gray-900">{sub.name}</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${sub.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {sub.is_active ? '● Activo' : '○ Pausado'}
+              <div className="min-w-0 flex-1">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <p className="font-semibold text-foreground">{sub.name}</p>
+                  <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${sub.is_active ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-muted text-muted-foreground'}`}>
+                    {sub.is_active ? 'Activo' : 'Pausado'}
                   </span>
                 </div>
-                <p className="text-xs text-gray-400 truncate mb-2 flex items-center gap-1" title={sub.url}>
-                  <Webhook size={11} className="flex-shrink-0" /> {sub.url}
+                <p className="mb-3 flex items-center gap-1.5 truncate text-xs text-muted-foreground" title={sub.url}>
+                  <Webhook size={12} strokeWidth={2} className="shrink-0" /> {sub.url}
                 </p>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {(sub.events ?? []).map(ev => {
                     const found = ALL_EVENTS.find(e => e.value === ev)
                     return (
-                      <span key={ev} className="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
+                      <span key={ev} className="inline-flex rounded-full bg-jungle-green-50 px-2 py-0.5 text-xs font-medium text-jungle-green-700">
                         {found?.label ?? ev}
                       </span>
                     )
@@ -260,47 +285,47 @@ export default function WebhookSubscriptionsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-2 flex-shrink-0">
-                <button
+              <div className="flex shrink-0 flex-col gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => testWebhook(sub.id)}
-                  disabled={testing === sub.id}
-                  className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 text-gray-700 font-medium flex items-center gap-1">
-                  {testing === sub.id ? 'Probando...' : <><RefreshCw size={12} />Probar</>}
-                </button>
-                <button onClick={() => toggleActive(sub)}
-                  className="text-xs border border-gray-200 px-3 py-1.5 rounded-lg hover:bg-gray-50 text-gray-700">
+                  disabled={testing === sub.id}>
+                  {testing === sub.id ? 'Probando...' : <><RefreshCw size={14} strokeWidth={2} /> Probar</>}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => toggleActive(sub)}>
                   {sub.is_active ? 'Pausar' : 'Activar'}
-                </button>
-                <button onClick={() => deleteSub(sub.id, sub.name)}
-                  className="text-xs border border-red-200 text-red-500 px-3 py-1.5 rounded-lg hover:bg-red-50">
+                </Button>
+                <Button variant="outline" size="sm" className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => deleteSub(sub.id, sub.name)}>
                   Eliminar
-                </button>
+                </Button>
               </div>
             </div>
 
             {/* Resultado del test */}
             {testResult?.id === sub.id && (
-              <div className={`mt-3 rounded-lg px-4 py-2.5 text-sm flex items-center gap-2 ${testResult.ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+              <div className={`mt-4 flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm ${testResult.ok ? 'border-jungle-green-200 bg-jungle-green-50 text-jungle-green-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
                 {testResult.ok
-                  ? `✅ Webhook enviado correctamente (HTTP ${testResult.status})`
-                  : `❌ Error: ${testResult.error ?? 'No se pudo conectar con el endpoint'}`}
+                  ? <><CheckCircle size={16} strokeWidth={2} className="shrink-0" /> Webhook enviado correctamente (HTTP {testResult.status})</>
+                  : <><XCircle size={16} strokeWidth={2} className="shrink-0" /> Error: {testResult.error ?? 'No se pudo conectar con el endpoint'}</>}
               </div>
             )}
           </div>
         ))}
 
         {subs.length === 0 && (
-          <div className="text-center py-20 bg-white rounded-xl border-2 border-dashed border-gray-200">
-            <p className="text-5xl mb-4">🔗</p>
-            <p className="text-lg font-semibold text-gray-700">Sin webhooks configurados</p>
-            <p className="text-sm text-gray-400 mt-2 max-w-md mx-auto">
-              Configura un webhook para que tu CRM reciba notificaciones en tiempo real cuando lleguen mensajes o cambien estados.
-            </p>
-            <button onClick={() => setShowForm(true)}
-              className="mt-6 bg-blue-600 text-white px-6 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 flex items-center gap-1.5 mx-auto">
-              <Plus size={14} /> Crear primera suscripción
-            </button>
-          </div>
+          <SectionCard>
+            <EmptyState
+              icon={Webhook}
+              title="Sin webhooks configurados"
+              description="Configura un webhook para que tu CRM reciba notificaciones en tiempo real cuando lleguen mensajes o cambien estados."
+              action={
+                <Button onClick={() => setShowForm(true)}>
+                  <Plus size={16} strokeWidth={2} /> Crear primera suscripción
+                </Button>
+              }
+            />
+          </SectionCard>
         )}
       </div>
     </div>

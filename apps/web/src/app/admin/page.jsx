@@ -2,15 +2,14 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import api from '../../lib/api'
-
-function StatBadge({ label, value, color = 'bg-blue-50 text-blue-700' }) {
-  return (
-    <div className={`rounded-xl p-4 ${color}`}>
-      <p className="text-xs font-medium uppercase tracking-wide opacity-70">{label}</p>
-      <p className="text-2xl font-bold mt-1">{typeof value === 'number' ? value.toLocaleString() : value}</p>
-    </div>
-  )
-}
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatCard } from '@/components/ui/stat-card'
+import { SectionCard } from '@/components/ui/section-card'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Button } from '@/components/ui/button'
+import {
+  Shield, Users, Megaphone, Send, User, Mail, ArrowLeft, Loader2, Lock, Info,
+} from '@/components/ui/icons'
 
 export default function AdminPage() {
   const [stats, setStats]     = useState(null)
@@ -48,112 +47,148 @@ export default function AdminPage() {
     setCampaigns(data)
   }
 
-  if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center text-gray-500">Cargando...</div>
-
-  if (error) return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="bg-white rounded-xl p-8 shadow text-center max-w-sm">
-        <p className="text-4xl mb-3">🔒</p>
-        <p className="font-semibold text-gray-800">{error}</p>
-        <Link href="/dashboard" className="mt-4 inline-block text-sm text-blue-600 hover:underline">Volver al dashboard</Link>
+  if (loading) return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin text-jungle-green-600" />
+        Cargando...
       </div>
     </div>
   )
 
-  const STATUS_COLOR = { draft: 'bg-gray-100 text-gray-700', sending: 'bg-blue-100 text-blue-700', completed: 'bg-green-100 text-green-700', failed: 'bg-red-100 text-red-700', paused: 'bg-yellow-100 text-yellow-700', scheduled: 'bg-purple-100 text-purple-700' }
+  if (error) return (
+    <div className="flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="w-full max-w-sm rounded-xl border bg-card p-8 text-center shadow-sm">
+        <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+          <Lock size={22} strokeWidth={1.75} />
+        </span>
+        <p className="font-semibold text-foreground">{error}</p>
+        <Button asChild variant="outline" size="sm" className="mt-5">
+          <Link href="/dashboard">
+            <ArrowLeft size={16} strokeWidth={2} />
+            Volver al dashboard
+          </Link>
+        </Button>
+      </div>
+    </div>
+  )
+
+  const STATUS_COLOR = {
+    draft: 'bg-muted text-muted-foreground',
+    sending: 'bg-blue-100 text-blue-700',
+    completed: 'bg-jungle-green-100 text-jungle-green-700',
+    failed: 'bg-red-100 text-red-700',
+    paused: 'bg-amber-100 text-amber-700',
+    scheduled: 'bg-violet-100 text-violet-700',
+  }
+
+  const visibleClients = clients.filter(c => !c.is_admin)
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <span className="text-lg font-bold">Kubo Mail</span>
-          <span className="text-xs bg-red-600 px-2 py-0.5 rounded font-medium">ADMIN</span>
-        </div>
-        <Link href="/dashboard" className="text-sm text-gray-400 hover:text-white">← Dashboard</Link>
-      </div>
-
-      <div className="max-w-6xl mx-auto p-6 space-y-6">
-        <h1 className="text-2xl font-bold">Panel de administración</h1>
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-7xl space-y-6 p-6">
+        <PageHeader
+          icon={Shield}
+          title="Panel de administración"
+          description="Gestiona clientes y supervisa la actividad global del orquestador."
+          action={
+            <Button asChild variant="outline" size="sm">
+              <Link href="/dashboard">
+                <ArrowLeft size={16} strokeWidth={2} />
+                Dashboard
+              </Link>
+            </Button>
+          }
+        />
 
         {/* Stats globales */}
         {stats && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatBadge label="Clientes"       value={stats.clients}     color="bg-blue-50 text-blue-700" />
-            <StatBadge label="Campanas"       value={stats.campaigns}   color="bg-purple-50 text-purple-700" />
-            <StatBadge label="Correos enviados" value={stats.emails_sent} color="bg-green-50 text-green-700" />
-            <StatBadge label="Contactos"      value={stats.contacts}    color="bg-orange-50 text-orange-700" />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard icon={Users}    label="Clientes"        value={Number(stats.clients).toLocaleString()}     tone="green" />
+            <StatCard icon={Megaphone} label="Campañas"        value={Number(stats.campaigns).toLocaleString()}   tone="violet" />
+            <StatCard icon={Send}     label="Correos enviados" value={Number(stats.emails_sent).toLocaleString()} tone="blue" />
+            <StatCard icon={User}     label="Contactos"        value={Number(stats.contacts).toLocaleString()}    tone="amber" />
           </div>
         )}
 
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid gap-6 lg:grid-cols-2">
           {/* Lista de clientes */}
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
-              <p className="font-semibold text-gray-700">Clientes ({clients.filter(c => !c.is_admin).length})</p>
-            </div>
-            <div className="divide-y">
-              {clients.filter(c => !c.is_admin).map(c => (
-                <div key={c.id} className={`px-5 py-3 flex items-center justify-between gap-3 ${!c.is_active ? 'opacity-50' : ''}`}>
-                  <div className="min-w-0">
-                    <button onClick={() => viewCampaigns(c)}
-                      className="font-medium text-sm text-gray-800 hover:text-blue-600 text-left truncate block max-w-[160px]">
-                      {c.name}
-                    </button>
-                    <p className="text-xs text-gray-400 truncate">{c.email}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {Number(c.campaign_count)} campanas · {Number(c.total_sent).toLocaleString()} enviados · {Number(c.domain_count)} dominios
-                    </p>
+          <SectionCard title="Clientes" description={`${visibleClients.length} registrados`} noPadding>
+            {visibleClients.length === 0 ? (
+              <EmptyState
+                icon={Users}
+                title="Sin clientes registrados"
+                description="Todavía no hay clientes en la plataforma."
+              />
+            ) : (
+              <div className="divide-y">
+                {visibleClients.map(c => (
+                  <div key={c.id} className={`flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/40 ${!c.is_active ? 'opacity-60' : ''}`}>
+                    <div className="min-w-0">
+                      <button
+                        onClick={() => viewCampaigns(c)}
+                        className="block max-w-[180px] truncate text-left text-sm font-medium text-foreground hover:text-jungle-green-700">
+                        {c.name}
+                      </button>
+                      <p className="truncate text-xs text-muted-foreground">{c.email}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {Number(c.campaign_count)} campañas, {Number(c.total_sent).toLocaleString()} enviados, {Number(c.domain_count)} dominios
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${c.is_active ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-muted text-muted-foreground'}`}>
+                        {c.is_active ? 'Activo' : 'Inactivo'}
+                      </span>
+                      <Button
+                        variant={c.is_active ? 'outline' : 'default'}
+                        size="sm"
+                        onClick={() => toggleClient(c.id, !c.is_active)}>
+                        {c.is_active ? 'Desactivar' : 'Activar'}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${c.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                      {c.is_active ? 'Activo' : 'Inactivo'}
-                    </span>
-                    <button
-                      onClick={() => toggleClient(c.id, !c.is_active)}
-                      className="text-xs text-gray-400 hover:text-gray-700 border border-gray-200 rounded px-2 py-0.5 hover:bg-gray-50">
-                      {c.is_active ? 'Desactivar' : 'Activar'}
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {clients.filter(c => !c.is_admin).length === 0 && (
-                <p className="px-5 py-8 text-center text-gray-400 text-sm">Sin clientes registrados</p>
-              )}
-            </div>
-          </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
 
-          {/* Campanas del cliente seleccionado */}
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100 bg-gray-50">
-              <p className="font-semibold text-gray-700">
-                {selected ? `Campanas de ${selected.name}` : 'Campanas'}
-              </p>
-            </div>
+          {/* Campañas del cliente seleccionado */}
+          <SectionCard
+            title={selected ? `Campañas de ${selected.name}` : 'Campañas'}
+            description={selected ? 'Detalle de envíos del cliente.' : undefined}
+            noPadding>
             {!selected ? (
-              <p className="px-5 py-8 text-center text-gray-400 text-sm">Selecciona un cliente para ver sus campanas</p>
+              <EmptyState
+                icon={Megaphone}
+                title="Selecciona un cliente"
+                description="Elige un cliente de la lista para ver sus campañas."
+              />
             ) : campaigns.length === 0 ? (
-              <p className="px-5 py-8 text-center text-gray-400 text-sm">Sin campanas</p>
+              <EmptyState
+                icon={Mail}
+                title="Sin campañas"
+                description="Este cliente todavía no tiene campañas."
+              />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-100">
-                    <tr>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Nombre</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Estado</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500">Enviados</th>
+                  <thead>
+                    <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="px-5 py-3 font-medium">Nombre</th>
+                      <th className="px-5 py-3 font-medium">Estado</th>
+                      <th className="px-5 py-3 text-right font-medium">Enviados</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-50">
+                  <tbody className="divide-y">
                     {campaigns.map(c => (
-                      <tr key={c.id} className="hover:bg-gray-50">
-                        <td className="px-4 py-2 font-medium text-xs">{c.name}</td>
-                        <td className="px-4 py-2">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLOR[c.status] ?? ''}`}>
+                      <tr key={c.id} className="transition-colors hover:bg-muted/40">
+                        <td className="px-5 py-3 font-medium text-foreground">{c.name}</td>
+                        <td className="px-5 py-3">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLOR[c.status] ?? 'bg-muted text-muted-foreground'}`}>
                             {c.status}
                           </span>
                         </td>
-                        <td className="px-4 py-2 text-right text-xs text-gray-500">
+                        <td className="px-5 py-3 text-right tabular-nums text-muted-foreground">
                           {Number(c.sent_count).toLocaleString()} / {Number(c.total_recipients).toLocaleString()}
                         </td>
                       </tr>
@@ -162,16 +197,24 @@ export default function AdminPage() {
                 </table>
               </div>
             )}
-          </div>
+          </SectionCard>
         </div>
 
         {/* Instrucciones para hacer admin */}
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-          <p className="font-semibold mb-1">Para dar acceso de administrador a un usuario:</p>
-          <code className="block bg-amber-100 rounded px-3 py-2 text-xs font-mono mt-1">
-            UPDATE clients SET is_admin = true WHERE email = 'usuario@ejemplo.com';
-          </code>
-        </div>
+        <SectionCard>
+          <div className="flex gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+              <Info size={18} strokeWidth={2} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">Para dar acceso de administrador a un usuario</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">Ejecuta esta consulta en la base de datos.</p>
+              <code className="mt-3 block overflow-x-auto rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
+                UPDATE clients SET is_admin = true WHERE email = 'usuario@ejemplo.com';
+              </code>
+            </div>
+          </div>
+        </SectionCard>
       </div>
     </div>
   )

@@ -2,330 +2,199 @@
 import { useEffect, useState } from 'react'
 import api from '../../../lib/api'
 import DeliverabilityGuide from '../../../components/domains/DeliverabilityGuide'
-import { RefreshCw, Pencil, Trash2, Save, ChevronUp, ChevronDown, Plus, User } from '../../../components/ui/icons'
+import {
+  RefreshCw, Pencil, Save, ChevronUp, ChevronDown, Plus, User, Globe, Mail,
+  Loader2, Check, X, Trash2,
+} from '../../../components/ui/icons'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatCard } from '@/components/ui/stat-card'
+import { SectionCard } from '@/components/ui/section-card'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Modal } from '@/components/ui/modal'
+import { SelectMenu } from '@/components/ui/select-menu'
+import { cn } from '@/lib/utils'
 
-function Badge({ ok, label }) {
+const inputClass = 'h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0'
+const PORT_PRESETS = [
+  { label: '587 — STARTTLS (recomendado)', port: 587, tls: true },
+  { label: '465 — SSL/TLS', port: 465, tls: true },
+  { label: '25 — Sin cifrado', port: 25, tls: false },
+]
+const EMPTY_ACCOUNT = { email: '', smtp_host: '', smtp_port: 587, smtp_user: '', smtp_pass: '', use_tls: true, daily_limit: 300 }
+
+function DnsBadge({ ok, label }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full font-medium
-      ${ok ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'}`}>
-      <span>{ok ? '✓' : '○'}</span>{label}
+    <span className={cn('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+      ok ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-muted text-muted-foreground')}>
+      {ok ? <Check size={11} strokeWidth={2.5} /> : <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40" />}{label}
     </span>
   )
 }
 
-function StatusDot({ active }) {
-  return <span className={`inline-block w-2 h-2 rounded-full ${active ? 'bg-green-500' : 'bg-gray-300'}`} />
-}
-
-const PORT_PRESETS = [
-  { label: '587 — STARTTLS (recomendado)', port: 587, tls: true },
-  { label: '465 — SSL/TLS',                port: 465, tls: true },
-  { label: '25  — Sin cifrado',            port: 25,  tls: false },
-]
-
-const EMPTY_ACCOUNT = { email: '', smtp_host: '', smtp_port: 587, smtp_user: '', smtp_pass: '', use_tls: true, daily_limit: 300 }
-
-function AccountForm({ domainId, onSaved, onCancel }) {
-  const [form, setForm]       = useState(EMPTY_ACCOUNT)
+// ── Modal de cuenta SMTP (alta y edición) ────────────────────────────────────
+function AccountModal({ domainId, account, onClose, onSaved }) {
+  const editing = !!account
+  const [form, setForm] = useState(editing
+    ? { email: account.email, smtp_host: account.smtp_host, smtp_port: account.smtp_port, smtp_user: account.smtp_user ?? account.email, smtp_pass: '', use_tls: account.use_tls, daily_limit: account.daily_limit }
+    : { ...EMPTY_ACCOUNT })
   const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState('')
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
+  const [error, setError] = useState('')
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   async function submit(e) {
     e.preventDefault()
     setLoading(true); setError('')
     try {
-      await api.post(`/domains/${domainId}/accounts`, {
-        ...form, smtp_port: parseInt(form.smtp_port), daily_limit: parseInt(form.daily_limit),
-      })
+      if (editing) {
+        await api.patch(`/domains/${domainId}/accounts/${account.id}`, {
+          email: form.email, smtp_host: form.smtp_host, smtp_port: parseInt(form.smtp_port), smtp_user: form.smtp_user,
+          use_tls: form.use_tls, daily_limit: parseInt(form.daily_limit), ...(form.smtp_pass ? { smtp_pass: form.smtp_pass } : {}),
+        })
+      } else {
+        await api.post(`/domains/${domainId}/accounts`, { ...form, smtp_port: parseInt(form.smtp_port), daily_limit: parseInt(form.daily_limit) })
+      }
       onSaved()
-    } catch (err) {
-      setError(err.response?.data?.error ?? 'Error al guardar la cuenta')
-    } finally {
-      setLoading(false)
-    }
+    } catch (err) { setError(err.response?.data?.error ?? 'Error al guardar la cuenta') }
+    finally { setLoading(false) }
   }
 
   return (
-    <form onSubmit={submit} className="bg-blue-50 border border-blue-200 rounded-xl p-5 mt-3 space-y-4">
-      <p className="text-sm font-semibold text-blue-800">Nueva cuenta SMTP</p>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2">
-          <label className="block text-xs font-medium text-gray-700 mb-1">Email de envio *</label>
-          <input required value={form.email} onChange={e => set('email', e.target.value)}
-            placeholder="ventas@tudominio.com"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Servidor SMTP *</label>
-          <input required value={form.smtp_host} onChange={e => set('smtp_host', e.target.value)}
-            placeholder="mail.tudominio.com"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Puerto</label>
-          <div className="flex gap-2">
-            <input type="number" value={form.smtp_port} onChange={e => set('smtp_port', e.target.value)}
-              className="w-20 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <select onChange={e => { const p = PORT_PRESETS[e.target.value]; set('smtp_port', p.port); set('use_tls', p.tls) }}
-              defaultValue=""
-              className="flex-1 border border-gray-300 rounded-lg px-2 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="" disabled>Presets...</option>
-              {PORT_PRESETS.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
-            </select>
+    <Modal open onClose={onClose} size="xl" icon={Mail} title={editing ? 'Editar cuenta SMTP' : 'Nueva cuenta SMTP'}>
+      <form onSubmit={submit} className="space-y-4 p-6">
+        {error && <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="col-span-2 space-y-1.5">
+            <Label>Email de envío *</Label>
+            <Input required value={form.email} onChange={e => set('email', e.target.value)} placeholder="ventas@tudominio.com" className={inputClass} />
           </div>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Usuario SMTP *</label>
-          <input required value={form.smtp_user} onChange={e => set('smtp_user', e.target.value)}
-            placeholder="ventas@tudominio.com"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Contrasena SMTP *</label>
-          <input required type="password" value={form.smtp_pass} onChange={e => set('smtp_pass', e.target.value)}
-            placeholder="••••••••"
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">Limite diario (correos)</label>
-          <input type="number" value={form.daily_limit} onChange={e => set('daily_limit', e.target.value)}
-            min={1} max={2000}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        </div>
-        <div className="flex items-end pb-1">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={form.use_tls} onChange={e => set('use_tls', e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 text-blue-600" />
-            <span className="text-sm text-gray-700">Usar TLS</span>
+          <div className="space-y-1.5">
+            <Label>Servidor SMTP *</Label>
+            <Input required value={form.smtp_host} onChange={e => set('smtp_host', e.target.value)} placeholder="mail.tudominio.com" className={inputClass} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Puerto</Label>
+            <div className="flex gap-2">
+              <Input type="number" value={form.smtp_port} onChange={e => set('smtp_port', e.target.value)} className={`${inputClass} w-24`} />
+              <div className="flex-1">
+                <SelectMenu value="" placeholder="Preset..." className="h-[52px]"
+                  onChange={i => { const p = PORT_PRESETS[i]; set('smtp_port', p.port); set('use_tls', p.tls) }}
+                  options={PORT_PRESETS.map((p, i) => ({ value: String(i), label: p.label }))} />
+              </div>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Usuario SMTP *</Label>
+            <Input required value={form.smtp_user} onChange={e => set('smtp_user', e.target.value)} placeholder="ventas@tudominio.com" className={inputClass} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Contraseña SMTP {editing && <span className="font-normal text-muted-foreground">(vacío = no cambiar)</span>}{!editing && ' *'}</Label>
+            <Input required={!editing} type="password" value={form.smtp_pass} onChange={e => set('smtp_pass', e.target.value)} placeholder="••••••••" className={inputClass} />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Límite diario (correos)</Label>
+            <Input type="number" value={form.daily_limit} onChange={e => set('daily_limit', e.target.value)} min={1} max={2000} className={inputClass} />
+          </div>
+          <label className="col-span-2 flex w-fit cursor-pointer items-center gap-2 rounded-xl border bg-muted/40 px-4 py-2.5">
+            <Checkbox checked={form.use_tls} onCheckedChange={v => set('use_tls', !!v)} />
+            <span className="text-sm text-foreground">Usar TLS</span>
           </label>
         </div>
-      </div>
-      {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded-lg">{error}</p>}
-      <div className="flex gap-2">
-        <button type="submit" disabled={loading}
-          className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
-          {loading ? 'Guardando...' : 'Guardar cuenta'}
-        </button>
-        <button type="button" onClick={onCancel}
-          className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-          Cancelar
-        </button>
-      </div>
-    </form>
+        <div className="flex gap-3 pt-1">
+          <Button type="submit" disabled={loading} className="flex-1">
+            {loading ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Save size={16} /> {editing ? 'Guardar cambios' : 'Guardar cuenta'}</>}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancelar</Button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 
-function AccountRow({ account, domainId, members, onDeleted }) {
-  const [testing, setTesting]       = useState(false)
+// ── Fila de cuenta SMTP ───────────────────────────────────────────────────────
+function AccountRow({ account, domainId, members, onChanged }) {
+  const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState(null)
-  const [editing, setEditing]       = useState(false)
-  const [assigningId, setAssigningId] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [assigning, setAssigning] = useState(false)
 
   async function assign(memberId) {
-    setAssigningId(memberId)
-    try {
-      await api.patch(`/domains/${domainId}/accounts/${account.id}/assign`, { member_id: memberId || null })
-      onDeleted() // recarga
-    } catch {}
-    setAssigningId(null)
+    setAssigning(true)
+    try { await api.patch(`/domains/${domainId}/accounts/${account.id}/assign`, { member_id: memberId || null }); onChanged() } catch {}
+    setAssigning(false)
   }
-  const [form, setForm]             = useState({
-    email:       account.email,
-    smtp_host:   account.smtp_host,
-    smtp_port:   account.smtp_port,
-    smtp_user:   account.smtp_user ?? account.email,
-    smtp_pass:   '',
-    use_tls:     account.use_tls,
-    daily_limit: account.daily_limit,
-  })
-  const [saving, setSaving]   = useState(false)
-  const [saveErr, setSaveErr] = useState('')
-
-  function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
-
   async function testConnection() {
     setTesting(true); setTestResult(null)
-    try {
-      const { data } = await api.post(`/domains/${domainId}/accounts/${account.id}/test`)
-      setTestResult(data)
-    } catch (err) {
-      setTestResult({ ok: false, message: err.response?.data?.message ?? 'Error de conexion' })
-    } finally { setTesting(false) }
+    try { const { data } = await api.post(`/domains/${domainId}/accounts/${account.id}/test`); setTestResult(data) }
+    catch (err) { setTestResult({ ok: false, message: err.response?.data?.message ?? 'Error de conexión' }) }
+    finally { setTesting(false) }
   }
-
-  async function saveEdit(e) {
-    e.preventDefault()
-    setSaving(true); setSaveErr('')
-    try {
-      const payload = {
-        email:       form.email,
-        smtp_host:   form.smtp_host,
-        smtp_port:   parseInt(form.smtp_port),
-        smtp_user:   form.smtp_user,
-        use_tls:     form.use_tls,
-        daily_limit: parseInt(form.daily_limit),
-        ...(form.smtp_pass ? { smtp_pass: form.smtp_pass } : {}),
-      }
-      await api.patch(`/domains/${domainId}/accounts/${account.id}`, payload)
-      setEditing(false)
-      onDeleted() // recarga lista
-    } catch (err) {
-      setSaveErr(err.response?.data?.error ?? 'Error al guardar')
-    } finally { setSaving(false) }
-  }
-
   async function remove() {
-    if (!confirm(`Eliminar la cuenta ${account.email}?`)) return
-    await api.delete(`/domains/${domainId}/accounts/${account.id}`)
-    onDeleted()
+    if (!confirm(`¿Eliminar la cuenta ${account.email}?`)) return
+    await api.delete(`/domains/${domainId}/accounts/${account.id}`); onChanged()
   }
 
   const usePct = account.daily_limit > 0 ? Math.round((account.sent_today / account.daily_limit) * 100) : 0
+  const memberOpts = [{ value: '', label: '— Sin asignar —', icon: <User size={14} className="text-muted-foreground" /> },
+    ...(members ?? []).filter(m => !m.is_owner).map(m => ({ value: m.id, label: `${m.name}`, icon: <User size={14} className="text-jungle-green-600" /> }))]
 
   return (
-    <div className="border border-gray-200 rounded-lg p-4 space-y-3 bg-white">
+    <div className="space-y-3 rounded-xl border bg-card p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2 min-w-0">
-          <StatusDot active={account.is_active} />
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className={cn('mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full', account.is_active ? 'bg-jungle-green-500' : 'bg-muted-foreground/40')} />
           <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{account.email}</p>
-            <p className="text-xs text-gray-400">{account.smtp_host}:{account.smtp_port} · {account.use_tls ? 'TLS activado' : 'Sin TLS'}</p>
+            <p className="truncate text-sm font-medium text-foreground">{account.email}</p>
+            <p className="text-xs text-muted-foreground">{account.smtp_host}:{account.smtp_port} · {account.use_tls ? 'TLS' : 'Sin TLS'}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={testConnection} disabled={testing}
-            className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-50 font-medium flex items-center gap-1">
-            {testing ? 'Probando...' : <><RefreshCw size={12} /> Probar</>}
-          </button>
-          <button onClick={() => setEditing(v => !v)}
-            className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:border-yellow-400 hover:text-yellow-600 hover:bg-yellow-50 font-medium flex items-center gap-1">
-            <Pencil size={12} /> Editar
-          </button>
-          <button onClick={remove}
-            className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-400 hover:bg-red-50 hover:text-red-600">
-            Eliminar
-          </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button size="sm" variant="outline" onClick={testConnection} disabled={testing}>
+            {testing ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Probar
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)}><Pencil size={12} /> Editar</Button>
+          <Button size="sm" variant="ghost" onClick={remove} className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"><Trash2 size={14} /></Button>
         </div>
       </div>
-
-      {/* Formulario de edición */}
-      {editing && (
-        <form onSubmit={saveEdit} className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 space-y-3 mt-2">
-          <p className="text-sm font-semibold text-yellow-800">Editar cuenta SMTP</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <label className="block text-xs font-medium text-gray-700 mb-1">Email de envío</label>
-              <input value={form.email} onChange={e => set('email', e.target.value)} required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Servidor SMTP</label>
-              <input value={form.smtp_host} onChange={e => set('smtp_host', e.target.value)} required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Puerto</label>
-              <div className="flex gap-2">
-                <input type="number" value={form.smtp_port} onChange={e => set('smtp_port', e.target.value)}
-                  className="w-20 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-                <select onChange={e => { const p = PORT_PRESETS[e.target.value]; set('smtp_port', p.port); set('use_tls', p.tls) }}
-                  defaultValue="" className="flex-1 border border-gray-300 rounded-lg px-2 py-2 text-xs">
-                  <option value="" disabled>Presets...</option>
-                  {PORT_PRESETS.map((p, i) => <option key={i} value={i}>{p.label}</option>)}
-                </select>
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Usuario SMTP</label>
-              <input value={form.smtp_user} onChange={e => set('smtp_user', e.target.value)} required
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">
-                Contraseña <span className="text-gray-400 font-normal">(dejar vacío para no cambiar)</span>
-              </label>
-              <input type="password" value={form.smtp_pass} onChange={e => set('smtp_pass', e.target.value)}
-                placeholder="Nueva contraseña..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Límite diario</label>
-              <input type="number" value={form.daily_limit} onChange={e => set('daily_limit', e.target.value)} min={1}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-400" />
-            </div>
-            <div className="flex items-end pb-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={form.use_tls} onChange={e => set('use_tls', e.target.checked)}
-                  className="h-4 w-4 rounded border-gray-300 text-yellow-500" />
-                <span className="text-sm text-gray-700">Usar TLS</span>
-              </label>
-            </div>
-          </div>
-          {saveErr && <p className="text-red-500 text-xs bg-red-50 p-2 rounded">{saveErr}</p>}
-          <div className="flex gap-2">
-            <button type="submit" disabled={saving}
-              className="px-4 py-2 text-sm bg-yellow-500 text-white rounded-lg font-medium hover:bg-yellow-600 disabled:opacity-50 flex items-center gap-1.5">
-              {saving ? 'Guardando...' : <><Save size={14} /> Guardar cambios</>}
-            </button>
-            <button type="button" onClick={() => { setEditing(false); setSaveErr('') }}
-              className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-              Cancelar
-            </button>
-          </div>
-        </form>
-      )}
 
       <div>
-        <div className="flex justify-between text-xs text-gray-400 mb-1">
+        <div className="mb-1 flex justify-between text-xs text-muted-foreground">
           <span>Uso hoy</span>
-          <span>{account.sent_today} / {account.daily_limit} ({usePct}%)</span>
+          <span className="tabular-nums">{account.sent_today} / {account.daily_limit} ({usePct}%)</span>
         </div>
-        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full ${usePct > 90 ? 'bg-red-400' : usePct > 70 ? 'bg-yellow-400' : 'bg-green-400'}`}
-            style={{ width: `${Math.min(usePct, 100)}%` }} />
+        <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className={cn('h-full rounded-full', usePct > 90 ? 'bg-red-500' : usePct > 70 ? 'bg-amber-400' : 'bg-jungle-green-500')} style={{ width: `${Math.min(usePct, 100)}%` }} />
         </div>
       </div>
 
-      {/* Asignación a asesor */}
       {members && members.length > 0 && (
-        <div className="mt-3">
-          <label className="text-xs text-gray-500 flex items-center gap-1 mb-1">
-            Asignado a asesor
-          </label>
-          <select
-            value={account.assigned_member_id ?? ''}
-            onChange={e => assign(e.target.value)}
-            disabled={!!assigningId}
-            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none">
-            <option value="">— Sin asignar —</option>
-            {members.filter(m => !m.is_owner).map(m => (
-              <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
-            ))}
-          </select>
-          {account.assigned_member_name && (
-            <p className="text-xs text-blue-600 mt-1 flex items-center gap-1"><User size={12} /> {account.assigned_member_name}</p>
-          )}
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Asignado a asesor</Label>
+          <SelectMenu value={account.assigned_member_id ?? ''} onChange={assign} options={memberOpts} disabled={assigning} loading={assigning} className="h-10" />
         </div>
       )}
 
       {testResult && (
-        <div className={`text-xs p-2 rounded-lg flex items-center gap-1.5 ${testResult.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-          <span>{testResult.ok ? '✓' : '✕'}</span>
-          <span>{testResult.message}</span>
+        <div className={cn('flex items-center gap-1.5 rounded-lg p-2 text-xs', testResult.ok ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-red-100 text-red-700')}>
+          {testResult.ok ? <Check size={14} /> : <X size={14} />}<span>{testResult.message}</span>
         </div>
       )}
+
+      {editing && <AccountModal domainId={domainId} account={account} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged() }} />}
     </div>
   )
 }
 
+// ── Panel de dominio (expandible) ─────────────────────────────────────────────
 function DomainPanel({ domain, onRefresh }) {
-  const [open, setOpen]         = useState(false)
+  const [open, setOpen] = useState(false)
   const [accounts, setAccounts] = useState([])
-  const [members, setMembers]   = useState([])
+  const [members, setMembers] = useState([])
   const [loadingAcc, setLoadingAcc] = useState(false)
-  const [showForm, setShowForm] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
 
   async function loadAccounts() {
     setLoadingAcc(true)
@@ -334,214 +203,165 @@ function DomainPanel({ domain, onRefresh }) {
         api.get(`/domains/${domain.id}/accounts`),
         api.get('/settings/team').catch(() => ({ data: [] })),
       ])
-      setAccounts(accRes.data)
-      setMembers(memRes.data ?? [])
-    } finally {
-      setLoadingAcc(false)
-    }
+      setAccounts(accRes.data); setMembers(memRes.data ?? [])
+    } finally { setLoadingAcc(false) }
   }
-
-  function toggle() {
-    if (!open) loadAccounts()
-    setOpen(v => !v)
-  }
-
-  async function toggleDNS(field) {
-    await api.patch(`/domains/${domain.id}`, { [field]: !domain[field] })
-    onRefresh()
-  }
-
-  async function remove() {
-    if (!confirm(`Eliminar el dominio ${domain.domain} y todas sus cuentas?`)) return
-    await api.delete(`/domains/${domain.id}`)
-    onRefresh()
-  }
+  function toggle() { if (!open) loadAccounts(); setOpen(v => !v) }
+  async function toggleDNS(field) { await api.patch(`/domains/${domain.id}`, { [field]: !domain[field] }); onRefresh() }
+  async function remove() { if (!confirm(`¿Eliminar el dominio ${domain.domain} y todas sus cuentas?`)) return; await api.delete(`/domains/${domain.id}`); onRefresh() }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-      <div className="flex items-center gap-4 p-5 cursor-pointer hover:bg-gray-50 transition-colors" onClick={toggle}>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-3 flex-wrap">
-            <p className="font-semibold text-gray-900">{domain.domain}</p>
+    <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
+      <div className="flex cursor-pointer items-center gap-4 p-5 transition-colors hover:bg-muted/40" onClick={toggle}>
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-jungle-green-50 text-jungle-green-600"><Globe size={20} strokeWidth={1.75} /></div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="font-semibold text-foreground">{domain.domain}</p>
             <div className="flex gap-1.5">
-              <Badge ok={domain.spf_configured}   label="SPF"   />
-              <Badge ok={domain.dkim_configured}  label="DKIM"  />
-              <Badge ok={domain.dmarc_configured} label="DMARC" />
+              <DnsBadge ok={domain.spf_configured} label="SPF" />
+              <DnsBadge ok={domain.dkim_configured} label="DKIM" />
+              <DnsBadge ok={domain.dmarc_configured} label="DMARC" />
             </div>
           </div>
-          <p className="text-xs text-gray-400 mt-1">
-            {domain.account_count} {domain.account_count === 1 ? 'cuenta' : 'cuentas'} · {' '}
-            {Number(domain.sent_today_total ?? 0).toLocaleString()} / {Number(domain.daily_limit).toLocaleString()} enviados hoy
+          <p className="mt-1 text-xs text-muted-foreground">
+            {domain.account_count} {domain.account_count === 1 ? 'cuenta' : 'cuentas'} · {Number(domain.sent_today_total ?? 0).toLocaleString()} / {Number(domain.daily_limit).toLocaleString()} enviados hoy
           </p>
         </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <button onClick={e => { e.stopPropagation(); remove() }}
-            className="text-xs text-red-400 hover:text-red-600 px-2 py-1 rounded hover:bg-red-50">
-            Eliminar
-          </button>
-          <span className="text-gray-400">{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</span>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={e => { e.stopPropagation(); remove() }} className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"><Trash2 size={15} /></Button>
+          <span className="text-muted-foreground">{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</span>
         </div>
       </div>
 
       {open && (
-        <div className="border-t border-gray-100 p-5 space-y-5 bg-gray-50">
-          {/* DNS */}
+        <div className="space-y-5 border-t bg-muted/30 p-5">
           <div>
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Estado DNS</p>
-            <div className="flex flex-wrap gap-4">
-              {[
-                { key: 'spf_configured',   label: 'SPF configurado'   },
-                { key: 'dkim_configured',  label: 'DKIM configurado'  },
-                { key: 'dmarc_configured', label: 'DMARC configurado' },
-              ].map(item => (
-                <label key={item.key} className="flex items-center gap-2 cursor-pointer text-sm text-gray-700"
-                  onClick={e => e.stopPropagation()}>
-                  <input type="checkbox" checked={!!domain[item.key]} onChange={() => toggleDNS(item.key)}
-                    className="h-4 w-4 rounded border-gray-300 text-blue-600" />
-                  {item.label}
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Estado DNS</p>
+            <div className="flex flex-wrap gap-3">
+              {[{ key: 'spf_configured', label: 'SPF configurado' }, { key: 'dkim_configured', label: 'DKIM configurado' }, { key: 'dmarc_configured', label: 'DMARC configurado' }].map(item => (
+                <label key={item.key} className="flex cursor-pointer items-center gap-2 rounded-xl border bg-card px-3 py-2 text-sm text-foreground" onClick={e => e.stopPropagation()}>
+                  <Checkbox checked={!!domain[item.key]} onCheckedChange={() => toggleDNS(item.key)} /> {item.label}
                 </label>
               ))}
             </div>
           </div>
 
-          {/* Guia de entregabilidad */}
           <DeliverabilityGuide domain={domain} />
 
-          {/* Cuentas SMTP */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                Cuentas SMTP ({accounts.length})
-              </p>
-              <button onClick={() => setShowForm(v => !v)}
-                className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 flex items-center gap-1">
-                <Plus size={12} /> Agregar cuenta
-              </button>
+            <div className="mb-3 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cuentas SMTP ({accounts.length})</p>
+              <Button size="sm" onClick={() => setAddOpen(true)}><Plus size={12} /> Agregar cuenta</Button>
             </div>
-
-            {showForm && (
-              <AccountForm
-                domainId={domain.id}
-                onSaved={() => { setShowForm(false); loadAccounts() }}
-                onCancel={() => setShowForm(false)}
-              />
-            )}
-
-            {loadingAcc && <p className="text-sm text-gray-400 py-2">Cargando...</p>}
-
-            <div className="space-y-2 mt-2">
-              {accounts.map(acc => (
-                <AccountRow key={acc.id} account={acc} domainId={domain.id} members={members} onDeleted={loadAccounts} />
-              ))}
-              {!loadingAcc && accounts.length === 0 && !showForm && (
-                <div className="text-center py-6 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-xl">
-                  Sin cuentas SMTP. Agrega al menos una para enviar campanas.
+            {loadingAcc && <p className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><Loader2 size={16} className="animate-spin text-jungle-green-600" /> Cargando...</p>}
+            <div className="space-y-2">
+              {accounts.map(acc => <AccountRow key={acc.id} account={acc} domainId={domain.id} members={members} onChanged={loadAccounts} />)}
+              {!loadingAcc && accounts.length === 0 && (
+                <div className="rounded-xl border border-dashed bg-card p-6 text-center">
+                  <Mail size={22} className="mx-auto mb-2 text-muted-foreground" />
+                  <p className="text-sm font-medium text-foreground">Sin cuentas SMTP</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Agrega al menos una para enviar campañas.</p>
                 </div>
               )}
             </div>
           </div>
+
+          {addOpen && <AccountModal domainId={domain.id} onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); loadAccounts(); onRefresh() }} />}
         </div>
       )}
     </div>
   )
 }
 
-export default function DomainsPage() {
-  const [domains, setDomains]   = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [newDomain, setNewDomain] = useState({ domain: '', daily_limit: 1000 })
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState('')
+// ── Modal nuevo dominio ───────────────────────────────────────────────────────
+function DomainModal({ onClose, onSaved }) {
+  const [form, setForm] = useState({ domain: '', daily_limit: 1000 })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  async function load() {
-    const { data } = await api.get('/domains')
-    setDomains(data)
-  }
-
-  useEffect(() => { load().finally(() => setLoading(false)) }, [])
-
-  async function addDomain(e) {
+  async function submit(e) {
     e.preventDefault()
     setSaving(true); setError('')
-    try {
-      await api.post('/domains', { ...newDomain, daily_limit: parseInt(newDomain.daily_limit) })
-      setNewDomain({ domain: '', daily_limit: 1000 })
-      setShowForm(false)
-      load()
-    } catch (err) {
-      setError(err.response?.data?.error ?? 'Error al guardar el dominio')
-    } finally {
-      setSaving(false)
-    }
+    try { await api.post('/domains', { ...form, daily_limit: parseInt(form.daily_limit) }); onSaved() }
+    catch (err) { setError(err.response?.data?.error ?? 'Error al guardar el dominio') }
+    finally { setSaving(false) }
   }
 
-  if (loading) return <div className="text-gray-500">Cargando...</div>
+  return (
+    <Modal open onClose={onClose} size="lg" icon={Globe} title="Nuevo dominio">
+      <form onSubmit={submit} className="space-y-4 p-6">
+        {error && <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label>Dominio *</Label>
+            <Input required value={form.domain} onChange={e => setForm(d => ({ ...d, domain: e.target.value }))} placeholder="miempresa.com" className={inputClass} />
+            <p className="text-xs text-muted-foreground">Solo el dominio, sin http://</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Límite diario total</Label>
+            <Input type="number" min={1} max={50000} value={form.daily_limit} onChange={e => setForm(d => ({ ...d, daily_limit: e.target.value }))} className={inputClass} />
+          </div>
+        </div>
+        <div className="rounded-xl border border-amber-100 bg-amber-50 p-4 text-xs text-amber-700">
+          <p className="mb-1 font-medium">Asegúrate de tener configurado en tu DNS:</p>
+          <ul className="list-inside list-disc space-y-0.5">
+            <li><strong>SPF</strong>: autoriza tu servidor a enviar correos del dominio</li>
+            <li><strong>DKIM</strong>: firma digital para autenticar los correos</li>
+            <li><strong>DMARC</strong>: política de manejo de correos no autenticados</li>
+          </ul>
+        </div>
+        <div className="flex gap-3 pt-1">
+          <Button type="submit" disabled={saving} className="flex-1">{saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Save size={16} /> Guardar dominio</>}</Button>
+          <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancelar</Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+export default function DomainsPage() {
+  const [domains, setDomains] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+
+  async function load() { const { data } = await api.get('/domains'); setDomains(data) }
+  useEffect(() => { load().finally(() => setLoading(false)) }, [])
+
+  if (loading) return (
+    <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+      <Loader2 size={18} className="animate-spin text-jungle-green-600" /> Cargando...
+    </div>
+  )
+
+  const totalAccounts = domains.reduce((a, d) => a + Number(d.account_count ?? 0), 0)
+  const sentToday     = domains.reduce((a, d) => a + Number(d.sent_today_total ?? 0), 0)
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Dominios de envio</h1>
-          <p className="text-sm text-gray-400 mt-0.5">Configura dominios y sus cuentas SMTP para enviar campanas</p>
-        </div>
-        <button onClick={() => setShowForm(v => !v)}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-1.5">
-          <Plus size={14} /> Agregar dominio
-        </button>
-      </div>
+    <div className="mx-auto max-w-7xl space-y-6">
+      <PageHeader icon={Globe} title="Dominios de envío"
+        description="Configura dominios y sus cuentas SMTP para enviar campañas."
+        action={<Button onClick={() => setShowForm(true)}><Plus size={14} /> Agregar dominio</Button>} />
 
-      {showForm && (
-        <form onSubmit={addDomain} className="bg-white rounded-xl shadow-sm p-5 space-y-4">
-          <p className="font-semibold text-gray-800">Nuevo dominio</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Dominio *</label>
-              <input required value={newDomain.domain}
-                onChange={e => setNewDomain(d => ({ ...d, domain: e.target.value }))}
-                placeholder="miempresa.com"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <p className="text-xs text-gray-400 mt-1">Solo el dominio, sin http://</p>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Limite diario total</label>
-              <input type="number" min={1} max={50000} value={newDomain.daily_limit}
-                onChange={e => setNewDomain(d => ({ ...d, daily_limit: e.target.value }))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-          </div>
-          <div className="bg-amber-50 rounded-lg p-3 text-xs text-amber-700">
-            <p className="font-medium mb-1">Asegurate de tener configurado en tu DNS:</p>
-            <ul className="list-disc list-inside space-y-0.5">
-              <li><strong>SPF</strong> — autoriza tu servidor a enviar correos del dominio</li>
-              <li><strong>DKIM</strong> — firma digital para autenticar los correos</li>
-              <li><strong>DMARC</strong> — politica de manejo de correos no autenticados</li>
-            </ul>
-          </div>
-          {error && <p className="text-red-500 text-sm bg-red-50 p-2 rounded-lg">{error}</p>}
-          <div className="flex gap-2">
-            <button type="submit" disabled={saving}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
-              {saving ? 'Guardando...' : 'Guardar dominio'}
-            </button>
-            <button type="button" onClick={() => setShowForm(false)}
-              className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
-              Cancelar
-            </button>
-          </div>
-        </form>
+      {domains.length > 0 && (
+        <div className="grid grid-cols-3 gap-4">
+          <StatCard icon={Globe} label="Dominios" value={domains.length} />
+          <StatCard icon={Mail} label="Cuentas SMTP" value={totalAccounts} tone="blue" />
+          <StatCard icon={RefreshCw} label="Enviados hoy" value={sentToday.toLocaleString()} tone="green" />
+        </div>
       )}
 
       <div className="space-y-3">
         {domains.map(d => <DomainPanel key={d.id} domain={d} onRefresh={load} />)}
         {!domains.length && (
-          <div className="bg-white rounded-xl shadow-sm p-12 text-center text-gray-400">
-            <p className="text-4xl mb-3">🌐</p>
-            <p className="font-medium text-gray-500">Sin dominios configurados</p>
-            <p className="text-sm mt-1">Agrega un dominio y luego sus cuentas SMTP para empezar a enviar.</p>
-          </div>
+          <SectionCard>
+            <EmptyState icon={Globe} title="Sin dominios configurados"
+              description="Agrega un dominio y luego sus cuentas SMTP para empezar a enviar."
+              action={<Button onClick={() => setShowForm(true)}><Plus size={14} /> Agregar dominio</Button>} />
+          </SectionCard>
         )}
       </div>
+
+      {showForm && <DomainModal onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); load() }} />}
     </div>
   )
 }

@@ -175,7 +175,7 @@ export async function docsRoutes(fastify) {
             method: 'POST',
             url: '{{base_url}}/contacts/ID_DEL_CONTACTO/phones',
             body: { phone: '+51999123456', label: 'Trabajo' },
-            description: 'label puede ser: Principal, Trabajo, Casa, Celular, Otro. El primer teléfono queda automáticamente como primario y actualiza contacts.phone.',
+            description: 'label puede ser: Trabajo, Casa, Móvil, Otro. Si se envía label "Principal" (o es el primer teléfono) queda como principal y reemplaza al anterior. Los teléfonos viven solo en contact_phones.',
           },
           {
             name: 'Marcar teléfono como principal',

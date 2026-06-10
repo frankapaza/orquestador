@@ -1,495 +1,401 @@
 'use client'
 import { useEffect, useState } from 'react'
 import api from '../../../lib/api'
-import { User, Pencil, Eye, UserPlus, Save, Plus, Copy, Lock } from '../../../components/ui/icons'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { SectionCard } from '@/components/ui/section-card'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Modal } from '@/components/ui/modal'
+import {
+  Settings, User, Users, Pencil, Eye, UserPlus, Save, Plus, Copy, Lock,
+  Check, X, Key, AlertCircle, CheckCircle, Star, Loader2, Trash2,
+} from '../../../components/ui/icons'
+import { cn } from '@/lib/utils'
 
-const TABS = ['Perfil', 'Equipo', 'API Keys']
+const TABS = [
+  { label: 'Perfil',   Icon: User },
+  { label: 'Equipo',   Icon: Users },
+  { label: 'API Keys', Icon: Key },
+]
+const INPUT_CLASS = 'h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0'
 
 const ROLES = [
-  {
-    value: 'asesor',
-    label: 'Asesor',
-    Icon: User,
-    color: 'bg-green-100 text-green-700',
-    description: 'Accede al Inbox, sus conversaciones WA/SMS asignadas y puede enviar mensajes a contactos.',
+  { value: 'asesor', label: 'Asesor', Icon: User, color: 'bg-jungle-green-100 text-jungle-green-700',
+    description: 'Accede al Inbox y sus conversaciones WA/SMS asignadas.',
     permisos: ['Inbox y conversaciones', 'Su número WA/SMS asignado', 'Enviar mensajes individuales'],
-    noPermisos: ['Campañas masivas', 'Configuración del sistema', 'Dominios e integraciones'],
-  },
-  {
-    value: 'editor',
-    label: 'Editor',
-    Icon: Pencil,
-    color: 'bg-blue-100 text-blue-700',
-    description: 'Gestiona campañas, contactos e integraciones. Ideal para el equipo de marketing.',
+    noPermisos: ['Campañas masivas', 'Configuración del sistema', 'Dominios e integraciones'] },
+  { value: 'editor', label: 'Editor', Icon: Pencil, color: 'bg-blue-100 text-blue-700',
+    description: 'Gestiona campañas, contactos e integraciones.',
     permisos: ['Todo lo del Asesor', 'Crear y gestionar campañas', 'Importar contactos', 'Ver reportes'],
-    noPermisos: ['Configuración de WhatsApp/SMS', 'Gestión del equipo', 'API Keys'],
-  },
-  {
-    value: 'viewer',
-    label: 'Visor',
-    Icon: Eye,
-    color: 'bg-gray-100 text-gray-600',
-    description: 'Solo lectura. Puede ver campañas y reportes pero no realizar cambios.',
+    noPermisos: ['Configuración de WhatsApp/SMS', 'Gestión del equipo', 'API Keys'] },
+  { value: 'viewer', label: 'Visor', Icon: Eye, color: 'bg-muted text-muted-foreground',
+    description: 'Solo lectura: ve campañas y reportes, sin cambios.',
     permisos: ['Ver campañas y reportes', 'Ver contactos'],
-    noPermisos: ['Crear o editar nada', 'Enviar mensajes', 'Configuración'],
-  },
+    noPermisos: ['Crear o editar nada', 'Enviar mensajes', 'Configuración'] },
 ]
-
 const ROLE_MAP   = Object.fromEntries(ROLES.map(r => [r.value, r]))
 const ROLE_LABEL = { owner: 'Dueño', ...Object.fromEntries(ROLES.map(r => [r.value, r.label])) }
-const ROLE_COLOR = { owner: 'bg-purple-100 text-purple-700', ...Object.fromEntries(ROLES.map(r => [r.value, r.color])) }
+const ROLE_COLOR = { owner: 'bg-violet-100 text-violet-700', ...Object.fromEntries(ROLES.map(r => [r.value, r.color])) }
+const ROLE_ICON   = { owner: Star, asesor: User, editor: Pencil, viewer: Eye }
+const ROLE_TILE   = { owner: 'bg-violet-50 text-violet-600', asesor: 'bg-jungle-green-50 text-jungle-green-600', editor: 'bg-blue-50 text-blue-600', viewer: 'bg-muted text-muted-foreground' }
+const ROLE_AVATAR = { owner: 'bg-violet-100 text-violet-700', asesor: 'bg-jungle-green-100 text-jungle-green-700', editor: 'bg-blue-100 text-blue-700', viewer: 'bg-muted text-muted-foreground' }
+const ROLE_CARDS = [
+  { value: 'owner',  label: 'Dueño',  description: 'Acceso total a la cuenta. Es la cuenta principal y no se puede eliminar.', caps: ['Acceso a todo'] },
+  { value: 'asesor', label: 'Asesor', description: ROLE_MAP.asesor.description, caps: ROLE_MAP.asesor.permisos.slice(0, 3) },
+  { value: 'editor', label: 'Editor', description: ROLE_MAP.editor.description, caps: ROLE_MAP.editor.permisos.slice(0, 3) },
+  { value: 'viewer', label: 'Visor',  description: ROLE_MAP.viewer.description, caps: ROLE_MAP.viewer.permisos.slice(0, 2) },
+]
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+function RoleChip({ role }) {
+  const Icon = ROLE_ICON[role] ?? User
+  return (
+    <span className={cn('inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium', ROLE_COLOR[role] ?? 'bg-muted text-muted-foreground')}>
+      <Icon size={11} strokeWidth={2} /> {ROLE_LABEL[role] ?? role}
+    </span>
+  )
+}
 
 function Field({ label, children }) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-gray-700 mb-1">{label}</label>
-      {children}
-    </div>
-  )
+  return <div className="space-y-1.5"><Label className="text-muted-foreground">{label}</Label>{children}</div>
 }
-
-function Input({ ...props }) {
-  return <input {...props} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-}
-
-function SaveBtn({ loading, label = 'Guardar cambios' }) {
-  return (
-    <button type="submit" disabled={loading}
-      className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50">
-      {loading ? 'Guardando...' : label}
-    </button>
-  )
-}
-
 function Notice({ type, msg }) {
   if (!msg) return null
+  const ok = type === 'ok'
   return (
-    <p className={`text-sm p-2.5 rounded-lg ${type === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
-      {msg}
+    <p className={cn('flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium', ok ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-red-100 text-red-700')}>
+      {ok ? <CheckCircle size={16} strokeWidth={1.75} /> : <AlertCircle size={16} strokeWidth={1.75} />}{msg}
     </p>
   )
 }
+function Avatar({ name, className }) {
+  return <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-jungle-green-100 text-sm font-semibold text-jungle-green-700', className)}>{(name ?? '?').charAt(0).toUpperCase()}</span>
+}
 
-// ── Tab: Perfil ───────────────────────────────────────────────────────────────
-
+// ── Perfil ────────────────────────────────────────────────────────────────────
 function ProfileTab({ user, onUpdated }) {
-  const [form, setForm]     = useState({ name: user?.name ?? '', email: user?.email ?? '' })
-  const [pass, setPass]     = useState({ current: '', new_pass: '', confirm: '' })
+  const [form, setForm] = useState({ name: user?.name ?? '', email: user?.email ?? '' })
+  const [pass, setPass] = useState({ current: '', new_pass: '', confirm: '' })
   const [loading, setLoading] = useState(false)
   const [passLoading, setPassLoading] = useState(false)
-  const [msg, setMsg]         = useState(null)
+  const [msg, setMsg] = useState(null)
   const [passMsg, setPassMsg] = useState(null)
-
   useEffect(() => { if (user) setForm({ name: user.name, email: user.email }) }, [user])
 
   async function saveProfile(e) {
-    e.preventDefault()
-    setLoading(true); setMsg(null)
-    try {
-      await api.patch('/settings/profile', form)
-      setMsg({ type: 'ok', text: 'Perfil actualizado' })
-      onUpdated()
-    } catch (err) {
-      setMsg({ type: 'err', text: err.response?.data?.error ?? 'Error al guardar' })
-    } finally { setLoading(false) }
+    e.preventDefault(); setLoading(true); setMsg(null)
+    try { await api.patch('/settings/profile', form); setMsg({ type: 'ok', text: 'Perfil actualizado' }); onUpdated() }
+    catch (err) { setMsg({ type: 'err', text: err.response?.data?.error ?? 'Error al guardar' }) } finally { setLoading(false) }
   }
-
   async function changePassword(e) {
     e.preventDefault()
-    if (pass.new_pass !== pass.confirm) return setPassMsg({ type: 'err', text: 'Las contrasenas no coinciden' })
+    if (pass.new_pass !== pass.confirm) return setPassMsg({ type: 'err', text: 'Las contraseñas no coinciden' })
     setPassLoading(true); setPassMsg(null)
-    try {
-      await api.patch('/settings/password', { current_password: pass.current, new_password: pass.new_pass })
-      setPassMsg({ type: 'ok', text: 'Contrasena actualizada' })
-      setPass({ current: '', new_pass: '', confirm: '' })
-    } catch (err) {
-      setPassMsg({ type: 'err', text: err.response?.data?.error ?? 'Error al cambiar contrasena' })
-    } finally { setPassLoading(false) }
+    try { await api.patch('/settings/password', { current_password: pass.current, new_password: pass.new_pass }); setPassMsg({ type: 'ok', text: 'Contraseña actualizada' }); setPass({ current: '', new_pass: '', confirm: '' }) }
+    catch (err) { setPassMsg({ type: 'err', text: err.response?.data?.error ?? 'Error al cambiar contraseña' }) } finally { setPassLoading(false) }
   }
 
   return (
-    <div className="space-y-6 max-w-lg">
-      {/* Info del plan */}
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-center justify-between">
-        <div>
-          <p className="text-sm font-semibold text-blue-800">{user?.name}</p>
-          <p className="text-xs text-blue-600">{user?.email}</p>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-jungle-green-100 bg-jungle-green-50 p-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-jungle-green-600 text-lg font-semibold text-white">{(user?.name ?? '?').charAt(0).toUpperCase()}</span>
+          <div>
+            <p className="text-sm font-semibold text-foreground">{user?.name}</p>
+            <p className="text-xs text-muted-foreground">{user?.email}</p>
+          </div>
         </div>
-        <span className="text-xs bg-blue-600 text-white px-2 py-1 rounded-full capitalize font-medium">
-          {user?.role === 'owner' || !user?.role ? `Plan ${user?.plan ?? 'basic'}` : ROLE_LABEL[user?.role]}
+        <span className="inline-flex shrink-0 rounded-full bg-jungle-green-600 px-2.5 py-1 text-xs font-medium capitalize text-white">
+          {['asesor', 'editor', 'viewer'].includes(user?.role) ? ROLE_LABEL[user.role] : `Plan ${user?.plan ?? 'basic'}`}
         </span>
       </div>
 
-      {/* Datos personales */}
-      <form onSubmit={saveProfile} className="bg-white rounded-xl shadow-sm p-5 space-y-4">
-        <h3 className="font-semibold text-gray-800">Datos personales</h3>
-        <Field label="Nombre">
-          <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required />
-        </Field>
-        <Field label="Email">
-          <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
-        </Field>
-        <Notice type={msg?.type} msg={msg?.text} />
-        <SaveBtn loading={loading} />
-      </form>
+      <SectionCard title="Datos personales" description="Actualiza tu nombre y correo de acceso.">
+        <form onSubmit={saveProfile} className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Nombre"><Input className={INPUT_CLASS} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required /></Field>
+            <Field label="Email"><Input className={INPUT_CLASS} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required /></Field>
+          </div>
+          <Notice type={msg?.type} msg={msg?.text} />
+          <Button type="submit" disabled={loading}>{loading ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Save size={16} /> Guardar cambios</>}</Button>
+        </form>
+      </SectionCard>
 
-      {/* Cambiar contraseña */}
-      <form onSubmit={changePassword} className="bg-white rounded-xl shadow-sm p-5 space-y-4">
-        <h3 className="font-semibold text-gray-800">Cambiar contrasena</h3>
-        <Field label="Contrasena actual">
-          <Input type="password" value={pass.current} onChange={e => setPass(f => ({ ...f, current: e.target.value }))} required />
-        </Field>
-        <Field label="Nueva contrasena (min. 8 caracteres)">
-          <Input type="password" value={pass.new_pass} onChange={e => setPass(f => ({ ...f, new_pass: e.target.value }))} required minLength={8} />
-        </Field>
-        <Field label="Confirmar nueva contrasena">
-          <Input type="password" value={pass.confirm} onChange={e => setPass(f => ({ ...f, confirm: e.target.value }))} required />
-        </Field>
-        <Notice type={passMsg?.type} msg={passMsg?.text} />
-        <SaveBtn loading={passLoading} label="Cambiar contrasena" />
-      </form>
+      <SectionCard title="Cambiar contraseña" description="Usa una clave de al menos 8 caracteres.">
+        <form onSubmit={changePassword} className="space-y-5">
+          <Field label="Contraseña actual"><Input className={INPUT_CLASS} type="password" value={pass.current} onChange={e => setPass(f => ({ ...f, current: e.target.value }))} required /></Field>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Nueva contraseña (mín. 8 caracteres)"><Input className={INPUT_CLASS} type="password" value={pass.new_pass} onChange={e => setPass(f => ({ ...f, new_pass: e.target.value }))} required minLength={8} /></Field>
+            <Field label="Confirmar nueva contraseña"><Input className={INPUT_CLASS} type="password" value={pass.confirm} onChange={e => setPass(f => ({ ...f, confirm: e.target.value }))} required /></Field>
+          </div>
+          <Notice type={passMsg?.type} msg={passMsg?.text} />
+          <Button type="submit" disabled={passLoading}>{passLoading ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Lock size={16} /> Cambiar contraseña</>}</Button>
+        </form>
+      </SectionCard>
     </div>
   )
 }
 
-// ── Tab: Equipo ───────────────────────────────────────────────────────────────
-
-function TeamTab() {
-  const [members, setMembers] = useState([])
-  const [form, setForm]       = useState({ name: '', email: '', password: '', role: 'asesor' })
+// ── Modal: agregar miembro ────────────────────────────────────────────────────
+function AddMemberModal({ onClose, onSaved }) {
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'asesor' })
   const [loading, setLoading] = useState(false)
-  const [msg, setMsg]         = useState(null)
-  const [showForm, setShowForm] = useState(false)
+  const [error, setError] = useState(null)
 
-  async function load() {
-    const { data } = await api.get('/settings/team')
-    setMembers(data)
+  async function submit(e) {
+    e.preventDefault(); setLoading(true); setError(null)
+    try { await api.post('/settings/team', form); onSaved(form.name) }
+    catch (err) { setError(err.response?.data?.error ?? 'Error al agregar el miembro') } finally { setLoading(false) }
   }
-
-  useEffect(() => { load() }, [])
-
-  async function addMember(e) {
-    e.preventDefault()
-    setLoading(true); setMsg(null)
-    try {
-      await api.post('/settings/team', form)
-      setMsg({ type: 'ok', text: `${form.name} agregado al equipo` })
-      setForm({ name: '', email: '', password: '', role: 'editor' })
-      setShowForm(false)
-      load()
-    } catch (err) {
-      setMsg({ type: 'err', text: err.response?.data?.error ?? 'Error al agregar miembro' })
-    } finally { setLoading(false) }
-  }
-
-  async function toggleMember(id, is_active) {
-    await api.patch(`/settings/team/${id}`, { is_active })
-    load()
-  }
-
-  async function removeMember(id, name) {
-    if (!confirm(`Eliminar a ${name} del equipo?`)) return
-    await api.delete(`/settings/team/${id}`)
-    load()
-  }
+  const role = ROLE_MAP[form.role]
 
   return (
-    <div className="space-y-4 max-w-2xl">
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-          <p className="font-semibold text-gray-800">Miembros del equipo ({members.length})</p>
-          <button onClick={() => setShowForm(s => !s)}
-            className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-1.5">
-            <UserPlus size={14} /> Invitar miembro
-          </button>
+    <Modal open onClose={onClose} size="2xl" icon={UserPlus} title="Agregar miembro"
+      description="Creas su cuenta con una contraseña temporal; podrá cambiarla al iniciar sesión.">
+      <form onSubmit={submit} className="space-y-5 p-6">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label="Nombre completo"><Input className={INPUT_CLASS} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="María López" /></Field>
+          <Field label="Email"><Input className={INPUT_CLASS} type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required placeholder="maria@empresa.com" /></Field>
+        </div>
+        <Field label="Contraseña temporal (mín. 8 caracteres)">
+          <Input className={INPUT_CLASS} type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required minLength={8} placeholder="El miembro podrá cambiarla luego" />
+        </Field>
+
+        <div className="space-y-2">
+          <Label className="text-muted-foreground">Rol</Label>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {ROLES.map(r => (
+              <button key={r.value} type="button" onClick={() => setForm(f => ({ ...f, role: r.value }))}
+                className={cn('rounded-xl border-2 p-3 text-left transition-all',
+                  form.role === r.value ? 'border-jungle-green-500 bg-jungle-green-50' : 'border-border bg-card hover:border-jungle-green-200 hover:bg-muted/40')}>
+                <r.Icon size={18} strokeWidth={1.75} className={cn('mb-1', form.role === r.value ? 'text-jungle-green-600' : 'text-muted-foreground')} />
+                <p className="text-sm font-semibold text-foreground">{r.label}</p>
+                <p className="mt-0.5 text-xs leading-tight text-muted-foreground">{r.description}</p>
+              </button>
+            ))}
+          </div>
+          {role && (
+            <div className="mt-3 grid grid-cols-1 gap-4 rounded-xl border bg-muted/30 p-4 sm:grid-cols-2">
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-jungle-green-700"><Check size={14} strokeWidth={2} /> Puede hacer</p>
+                {role.permisos.map(p => <p key={p} className="mb-1 flex gap-1.5 text-xs text-foreground"><Check size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-jungle-green-600" />{p}</p>)}
+              </div>
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-red-600"><X size={14} strokeWidth={2} /> No puede</p>
+                {role.noPermisos.map(p => <p key={p} className="mb-1 flex gap-1.5 text-xs text-muted-foreground"><X size={14} strokeWidth={2} className="mt-0.5 shrink-0 text-red-400" />{p}</p>)}
+              </div>
+            </div>
+          )}
         </div>
 
-        {showForm && (
-          <form onSubmit={addMember} className="p-5 bg-gray-50 border-b border-gray-200 space-y-4">
-            <p className="text-sm font-semibold text-gray-800">Nuevo miembro del equipo</p>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Nombre completo">
-                <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required placeholder="Maria Lopez" />
-              </Field>
-              <Field label="Email">
-                <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required placeholder="maria@empresa.com" />
-              </Field>
-            </div>
-            <Field label="Contraseña temporal (mín. 8 caracteres)">
-              <Input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required minLength={8} placeholder="El usuario podrá cambiarla luego" />
-            </Field>
+        {error && <Notice type="err" msg={error} />}
+        <div className="flex gap-3 pt-1">
+          <Button type="submit" disabled={loading} className="flex-1">{loading ? <><Loader2 size={16} className="animate-spin" /> Creando...</> : <><Save size={16} /> Crear miembro</>}</Button>
+          <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancelar</Button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
 
-            {/* Selector de rol visual */}
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-2">Rol</label>
-              <div className="grid grid-cols-3 gap-2">
-                {ROLES.map(r => (
-                  <button key={r.value} type="button"
-                    onClick={() => setForm(f => ({ ...f, role: r.value }))}
-                    className={`rounded-xl border-2 p-3 text-left transition-all ${
-                      form.role === r.value
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 bg-white hover:border-gray-300'
-                    }`}>
-                    <div className="mb-1"><r.Icon size={18} /></div>
-                    <p className="text-sm font-semibold text-gray-800">{r.label}</p>
-                    <p className="text-xs text-gray-500 mt-0.5 leading-tight">{r.description}</p>
-                  </button>
-                ))}
+// ── Equipo ────────────────────────────────────────────────────────────────────
+function TeamTab() {
+  const [members, setMembers] = useState([])
+  const [msg, setMsg] = useState(null)
+  const [showForm, setShowForm] = useState(false)
+
+  async function load() { const { data } = await api.get('/settings/team'); setMembers(data) }
+  useEffect(() => { load() }, [])
+
+  async function toggleMember(id, is_active) { await api.patch(`/settings/team/${id}`, { is_active }); load() }
+  async function removeMember(id, name) { if (!confirm(`¿Eliminar a ${name} del equipo?`)) return; await api.delete(`/settings/team/${id}`); load() }
+
+  return (
+    <div className="space-y-4">
+      <SectionCard noPadding title={`Miembros del equipo (${members.length})`}
+        action={<Button size="sm" onClick={() => setShowForm(true)}><UserPlus size={16} strokeWidth={1.75} /> Agregar miembro</Button>}>
+        {msg && <div className="px-5 pt-4"><Notice type={msg.type} msg={msg.text} /></div>}
+        <div className="divide-y">
+          {members.map(m => (
+            <div key={m.id} className={cn('group flex items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/40', !m.is_active && 'opacity-60')}>
+              <div className="relative shrink-0">
+                <Avatar name={m.name} className={ROLE_AVATAR[m.role] ?? ''} />
+                {!m.is_owner && <span className={cn('absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card', m.is_active ? 'bg-jungle-green-500' : 'bg-muted-foreground/40')} />}
               </div>
-
-              {/* Detalle del rol seleccionado */}
-              {ROLE_MAP[form.role] && (
-                <div className="mt-3 bg-white border border-gray-200 rounded-xl p-3 grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs font-semibold text-green-700 mb-1.5">✓ Puede hacer</p>
-                    {ROLE_MAP[form.role].permisos.map(p => (
-                      <p key={p} className="text-xs text-gray-600 flex gap-1.5 mb-1">
-                        <span className="text-green-500 flex-shrink-0">✓</span>{p}
-                      </p>
-                    ))}
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold text-red-600 mb-1.5">✕ No puede</p>
-                    {ROLE_MAP[form.role].noPermisos.map(p => (
-                      <p key={p} className="text-xs text-gray-500 flex gap-1.5 mb-1">
-                        <span className="text-red-400 flex-shrink-0">✕</span>{p}
-                      </p>
-                    ))}
-                  </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-medium text-foreground">{m.name}</p>
+                  {m.is_owner && <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">Tú</span>}
+                  {!m.is_active && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Suspendido</span>}
+                </div>
+                <p className="truncate text-xs text-muted-foreground">{m.email}</p>
+              </div>
+              <RoleChip role={m.role} />
+              {m.is_owner ? (
+                <span className="hidden whitespace-nowrap text-xs text-muted-foreground sm:inline">Cuenta principal</span>
+              ) : (
+                <div className="flex shrink-0 items-center gap-1">
+                  {m.is_active
+                    ? <Button variant="ghost" size="sm" className="h-7 px-2 text-amber-600 hover:bg-amber-50 hover:text-amber-700" onClick={() => toggleMember(m.id, false)}>Suspender</Button>
+                    : <Button variant="ghost" size="sm" className="h-7 px-2 text-jungle-green-700 hover:bg-jungle-green-50 hover:text-jungle-green-800" onClick={() => toggleMember(m.id, true)}>Activar</Button>}
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:bg-red-50 hover:text-red-600" onClick={() => removeMember(m.id, m.name)}><Trash2 size={14} /></Button>
                 </div>
               )}
             </div>
-
-            <Notice type={msg?.type} msg={msg?.text} />
-            <div className="flex gap-2">
-              <button type="submit" disabled={loading}
-                className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1.5">
-                {loading ? 'Guardando...' : <><Save size={14} /> Agregar al equipo</>}
-              </button>
-              <button type="button" onClick={() => setShowForm(false)}
-                className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-white">
-                Cancelar
-              </button>
-            </div>
-          </form>
-        )}
-
-        {!showForm && msg && <div className="px-5 pt-3"><Notice type={msg.type} msg={msg.text} /></div>}
-
-        <div className="divide-y">
-          {members.map(m => (
-            <div key={m.id} className={`px-5 py-3 flex items-center justify-between gap-3 ${!m.is_active ? 'opacity-50' : ''}`}>
-              <div>
-                <p className="text-sm font-medium text-gray-800">{m.name}</p>
-                <p className="text-xs text-gray-400">{m.email}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ROLE_COLOR[m.role] ?? ''}`}>
-                  {ROLE_LABEL[m.role] ?? m.role}
-                </span>
-                {m.is_owner ? (
-                  <span className="text-xs text-gray-400">Cuenta principal</span>
-                ) : (
-                  <>
-                    {!m.is_active
-                      ? <button onClick={() => toggleMember(m.id, true)} className="text-xs text-green-600 hover:underline">Activar</button>
-                      : <button onClick={() => toggleMember(m.id, false)} className="text-xs text-yellow-600 hover:underline">Suspender</button>
-                    }
-                    <button onClick={() => removeMember(m.id, m.name)}
-                      className="text-xs text-red-400 hover:text-red-600 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50">
-                      Eliminar
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
           ))}
         </div>
-      </div>
+      </SectionCard>
 
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
-        <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-3">Resumen de roles</p>
-        <div className="space-y-2">
-          {[{ value: 'owner', label: 'Dueño', icon: '👑', desc: 'Acceso total. Cuenta principal.' }, ...ROLES].map(r => (
-            <div key={r.value} className="flex items-start gap-3">
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 mt-0.5 flex items-center gap-1 ${ROLE_COLOR[r.value]}`}>
-                {r.icon ? r.icon : r.Icon ? <r.Icon size={11} /> : null} {ROLE_LABEL[r.value]}
-              </span>
-              <p className="text-xs text-gray-600">{r.desc ?? r.description}</p>
-            </div>
-          ))}
+      <SectionCard title="Roles y permisos" description="Qué puede hacer cada tipo de miembro.">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {ROLE_CARDS.map(r => {
+            const count = members.filter(m => (r.value === 'owner' ? m.is_owner : m.role === r.value && !m.is_owner)).length
+            const Icon = ROLE_ICON[r.value]
+            return (
+              <div key={r.value} className="rounded-2xl border bg-card p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2.5">
+                    <span className={cn('flex h-9 w-9 items-center justify-center rounded-xl', ROLE_TILE[r.value])}><Icon size={17} strokeWidth={1.75} /></span>
+                    <p className="text-sm font-semibold text-foreground">{r.label}</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">{count} {count === 1 ? 'miembro' : 'miembros'}</span>
+                </div>
+                <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{r.description}</p>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {r.caps.map(c => (
+                    <span key={c} className="inline-flex items-center gap-1 rounded-full bg-jungle-green-50 px-2 py-0.5 text-[11px] font-medium text-jungle-green-700">
+                      <Check size={10} strokeWidth={2.5} /> {c}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
-      </div>
+      </SectionCard>
+
+      {showForm && <AddMemberModal onClose={() => setShowForm(false)} onSaved={(name) => { setShowForm(false); setMsg({ type: 'ok', text: `${name} agregado al equipo` }); load() }} />}
     </div>
   )
 }
 
-// ── Tab: API Keys ─────────────────────────────────────────────────────────────
-
+// ── API Keys ──────────────────────────────────────────────────────────────────
 function ApiKeysTab() {
-  const [keys, setKeys]       = useState([])
-  const [newKey, setNewKey]   = useState(null) // key recién creada (mostrar solo una vez)
-  const [form, setForm]       = useState({ name: '' })
+  const [keys, setKeys] = useState([])
+  const [newKey, setNewKey] = useState(null)
+  const [form, setForm] = useState({ name: '' })
   const [loading, setLoading] = useState(false)
-  const [copied, setCopied]   = useState(false)
-  const [msg, setMsg]         = useState(null)
+  const [copied, setCopied] = useState(false)
+  const [msg, setMsg] = useState(null)
 
-  async function load() {
-    const { data } = await api.get('/settings/api-keys')
-    setKeys(data)
-  }
-
+  async function load() { const { data } = await api.get('/settings/api-keys'); setKeys(data) }
   useEffect(() => { load() }, [])
 
   async function createKey(e) {
-    e.preventDefault()
-    setLoading(true); setMsg(null)
-    try {
-      const { data } = await api.post('/settings/api-keys', { name: form.name })
-      setNewKey(data)
-      setForm({ name: '' })
-      load()
-    } catch (err) {
-      setMsg({ type: 'err', text: err.response?.data?.error ?? 'Error al crear API Key' })
-    } finally { setLoading(false) }
+    e.preventDefault(); setLoading(true); setMsg(null)
+    try { const { data } = await api.post('/settings/api-keys', { name: form.name }); setNewKey(data); setForm({ name: '' }); load() }
+    catch (err) { setMsg({ type: 'err', text: err.response?.data?.error ?? 'Error al crear API Key' }) } finally { setLoading(false) }
   }
-
-  async function revokeKey(id, name) {
-    if (!confirm(`Revocar la API Key "${name}"? Los sistemas que la usen perderan acceso.`)) return
-    await api.delete(`/settings/api-keys/${id}`)
-    load()
-  }
-
-  function copyKey(text) {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
+  async function revokeKey(id, name) { if (!confirm(`¿Revocar la API Key "${name}"? Los sistemas que la usen perderán acceso.`)) return; await api.delete(`/settings/api-keys/${id}`); load() }
+  function copyKey(text) { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000) }
 
   return (
-    <div className="space-y-4 max-w-2xl">
-      {/* Alerta key nueva */}
+    <div className="space-y-4">
       {newKey && (
-        <div className="bg-green-50 border-2 border-green-400 rounded-xl p-5 space-y-3">
-          <p className="font-semibold text-green-800">API Key creada — guarda esto ahora, no se mostrara de nuevo</p>
-          <div className="bg-white border border-green-300 rounded-lg px-4 py-3 font-mono text-sm text-gray-800 flex items-center justify-between gap-3 break-all">
+        <div className="space-y-3 rounded-2xl border border-jungle-green-300 bg-jungle-green-50 p-5">
+          <p className="flex items-center gap-2 font-semibold text-jungle-green-800"><CheckCircle size={18} strokeWidth={1.75} /> API Key creada. Guárdala ahora, no se mostrará de nuevo.</p>
+          <div className="flex items-center justify-between gap-3 break-all rounded-lg border border-jungle-green-300 bg-card px-4 py-3 font-mono text-sm text-foreground">
             <span>{newKey.raw_key}</span>
-            <button onClick={() => copyKey(newKey.raw_key)}
-              className="shrink-0 text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 flex items-center gap-1">
-              {copied ? 'Copiado!' : <><Copy size={12} /> Copiar</>}
-            </button>
+            <Button size="sm" className="shrink-0" onClick={() => copyKey(newKey.raw_key)}>{copied ? <><Check size={14} /> Copiado</> : <><Copy size={14} /> Copiar</>}</Button>
           </div>
-          <button onClick={() => setNewKey(null)} className="text-xs text-green-700 underline">Ya la guarde, cerrar</button>
+          <Button variant="ghost" size="sm" className="text-jungle-green-700 hover:text-jungle-green-800" onClick={() => setNewKey(null)}>Ya la guardé, cerrar</Button>
         </div>
       )}
 
-      {/* Formulario nueva key */}
-      <form onSubmit={createKey} className="bg-white rounded-xl shadow-sm p-5 space-y-3">
-        <h3 className="font-semibold text-gray-800">Generar nueva API Key</h3>
-        <div className="flex gap-3">
-          <div className="flex-1">
-            <Input value={form.name} onChange={e => setForm({ name: e.target.value })}
-              required placeholder="Ej: Mi CRM, App interna..." />
+      <SectionCard title="Generar nueva API Key" description="Para acceso programático a la API de Kubo.">
+        <form onSubmit={createKey} className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <Input className={`${INPUT_CLASS} flex-1`} value={form.name} onChange={e => setForm({ name: e.target.value })} required placeholder="Ej: Mi CRM, App interna..." />
+            <Button type="submit" disabled={loading} className="h-[52px] shrink-0 rounded-xl">{loading ? <><Loader2 size={16} className="animate-spin" /> Generando...</> : <><Plus size={16} /> Crear</>}</Button>
           </div>
-          <button type="submit" disabled={loading}
-            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 shrink-0 flex items-center gap-1">
-            {loading ? 'Generando...' : <><Plus size={14} /> Crear</>}
-          </button>
-        </div>
-        <Notice type={msg?.type} msg={msg?.text} />
-        <p className="text-xs text-gray-400">
-          Usa la API Key en el header: <code className="bg-gray-100 px-1.5 py-0.5 rounded">Authorization: Bearer kubo_...</code>
-        </p>
-      </form>
+          <Notice type={msg?.type} msg={msg?.text} />
+          <p className="text-xs text-muted-foreground">Úsala en el header: <code className="rounded bg-muted px-1.5 py-0.5 font-mono">Authorization: Bearer kubo_...</code></p>
+        </form>
+      </SectionCard>
 
-      {/* Lista de keys */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100">
-          <p className="font-semibold text-gray-800">API Keys activas ({keys.length})</p>
-        </div>
+      <SectionCard noPadding title={`API Keys activas (${keys.length})`}>
         {keys.length === 0 ? (
-          <p className="px-5 py-8 text-center text-gray-400 text-sm">Sin API Keys. Genera una para acceso programático.</p>
+          <EmptyState icon={Key} title="Sin API Keys" description="Genera una para acceso programático a la API de Kubo." />
         ) : (
           <div className="divide-y">
             {keys.map(k => (
-              <div key={k.id} className="px-5 py-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-medium text-gray-800">{k.name}</p>
-                  <p className="text-xs font-mono text-gray-400">{k.key_prefix}••••••••</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    Creada: {new Date(k.created_at).toLocaleDateString('es')}
-                    {k.last_used_at && ` · Último uso: ${new Date(k.last_used_at).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}`}
-                  </p>
+              <div key={k.id} className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/40">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground"><Key size={16} /></span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{k.name}</p>
+                    <p className="font-mono text-xs text-muted-foreground">{k.key_prefix}••••••••</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Creada: {new Date(k.created_at).toLocaleDateString('es')}{k.last_used_at && ` · Último uso: ${new Date(k.last_used_at).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' })}`}</p>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${k.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                    {k.is_active ? 'Activa' : 'Revocada'}
-                  </span>
-                  {k.is_active && (
-                    <button onClick={() => revokeKey(k.id, k.name)}
-                      className="text-xs text-red-400 hover:text-red-600 border border-red-200 rounded px-2 py-0.5 hover:bg-red-50 flex items-center gap-1">
-                      <Lock size={11} /> Revocar
-                    </button>
-                  )}
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className={cn('inline-flex rounded-full px-2 py-0.5 text-xs font-medium', k.is_active ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-muted text-muted-foreground')}>{k.is_active ? 'Activa' : 'Revocada'}</span>
+                  {k.is_active && <Button variant="ghost" size="sm" className="h-7 px-2 text-red-500 hover:bg-red-50 hover:text-red-600" onClick={() => revokeKey(k.id, k.name)}><Lock size={14} /> Revocar</Button>}
                 </div>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </SectionCard>
 
-      <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 text-sm text-gray-600 space-y-1">
-        <p className="font-semibold text-gray-700">Ejemplo de uso con curl:</p>
-        <code className="block bg-gray-800 text-green-400 rounded-lg px-4 py-3 text-xs font-mono mt-2 whitespace-pre">
-{`curl http://localhost:3001/api/v1/campaigns \\
-  -H "Authorization: Bearer kubo_TU_API_KEY"`}
-        </code>
-      </div>
+      <SectionCard title="Ejemplo de uso con curl">
+        <code className="block whitespace-pre rounded-lg bg-foreground px-4 py-3 font-mono text-xs text-jungle-green-300">{`curl http://localhost:3001/api/v1/campaigns \\
+  -H "Authorization: Bearer kubo_TU_API_KEY"`}</code>
+      </SectionCard>
     </div>
   )
 }
 
-// ── Página principal ──────────────────────────────────────────────────────────
+const TAB_DESC = ['Tu cuenta y contraseña', 'Miembros y roles', 'Acceso programático']
 
 export default function SettingsPage() {
-  const [tab, setTab]   = useState(0)
+  const [tab, setTab] = useState(0)
   const [user, setUser] = useState(null)
-
-  async function loadUser() {
-    const { data } = await api.get('/auth/me')
-    setUser(data)
-  }
-
+  async function loadUser() { const { data } = await api.get('/auth/me'); setUser(data) }
   useEffect(() => { loadUser() }, [])
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Configuracion</h1>
-        <p className="text-sm text-gray-400 mt-0.5">Gestiona tu perfil, equipo y acceso programático</p>
-      </div>
+    <div className="mx-auto max-w-6xl space-y-6">
+      <PageHeader icon={Settings} title="Configuración" description="Gestiona tu perfil, equipo y acceso programático." />
 
-      {/* Tabs */}
-      <div className="border-b border-gray-200 flex gap-0">
-        {TABS.map((t, i) => (
-          <button key={t} onClick={() => setTab(i)}
-            className={`px-5 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              tab === i
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
-            }`}>
-            {t}
-          </button>
-        ))}
-      </div>
+      <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
+        {/* Navegación de secciones */}
+        <nav className="flex gap-1 overflow-x-auto lg:sticky lg:top-6 lg:flex-col lg:self-start lg:overflow-visible">
+          {TABS.map((t, i) => {
+            const active = tab === i
+            return (
+              <button key={t.label} onClick={() => setTab(i)}
+                className={cn('flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors',
+                  active ? 'bg-jungle-green-50 text-jungle-green-700' : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground')}>
+                <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', active ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-muted text-muted-foreground')}>
+                  <t.Icon size={17} strokeWidth={1.75} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium leading-tight">{t.label}</span>
+                  <span className="hidden text-xs text-muted-foreground lg:block">{TAB_DESC[i]}</span>
+                </span>
+              </button>
+            )
+          })}
+        </nav>
 
-      <div>
-        {tab === 0 && <ProfileTab user={user} onUpdated={loadUser} />}
-        {tab === 1 && <TeamTab />}
-        {tab === 2 && <ApiKeysTab />}
+        {/* Contenido */}
+        <div className="min-w-0">
+          {tab === 0 && <ProfileTab user={user} onUpdated={loadUser} />}
+          {tab === 1 && <TeamTab />}
+          {tab === 2 && <ApiKeysTab />}
+        </div>
       </div>
     </div>
   )

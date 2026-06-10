@@ -2,15 +2,22 @@ import { z } from 'zod'
 import { sql } from '../../lib/db.js'
 import { enqueueCampaign, campaignQueue } from '../../workers/campaign.queue.js'
 
-const campaignSchema = z.object({
+const campaignBase = z.object({
   name: z.string().min(2),
-  subject: z.string().min(1),
-  from_name: z.string().min(1),
+  channel: z.enum(['email', 'whatsapp', 'sms']).default('email'),
+  // Email
+  subject: z.string().optional(),
+  from_name: z.string().optional(),
   reply_to: z.string().email().optional(),
-  html_content: z.string().min(1),
+  html_content: z.string().optional(),
   text_content: z.string().optional(),
-  list_id: z.string().uuid(),
   strategy: z.enum(['smtp_own', 'mailchimp', 'sendgrid', 'brevo']).default('smtp_own'),
+  // WhatsApp / SMS
+  content_text: z.string().optional(),
+  media_url: z.string().url().optional().or(z.literal('')),
+  media_caption: z.string().optional(),
+  // Común
+  list_id: z.string().uuid(),
   scheduled_at: z.string().datetime().optional(),
   settings: z.object({
     delay_min_ms: z.number().default(2000),
@@ -19,8 +26,18 @@ const campaignSchema = z.object({
     track_opens: z.boolean().default(true),
     track_clicks: z.boolean().default(true),
     integration_id: z.string().uuid().optional(),
+    media_type: z.string().optional(),
+    send_to_all: z.boolean().default(true),  // enviar a todos los teléfonos/correos del contacto
   }).default({}),
 })
+
+// El email requiere asunto/remitente/HTML; WhatsApp/SMS requieren el mensaje.
+const campaignSchema = campaignBase.refine(
+  d => d.channel === 'email'
+    ? !!(d.subject && d.from_name && d.html_content)
+    : !!(d.content_text && d.content_text.trim()),
+  { message: 'Faltan campos requeridos para el canal seleccionado' },
+)
 
 export async function campaignsRoutes(fastify) {
   const auth = { onRequest: [fastify.authenticate] }
@@ -52,11 +69,19 @@ export async function campaignsRoutes(fastify) {
     const [list] = await sql`SELECT id, total_count FROM contact_lists WHERE id = ${body.list_id} AND client_id = ${req.user.sub}`
     if (!list) return reply.code(404).send({ error: 'Lista no encontrada' })
 
+    // subject/from_name son NOT NULL; en WhatsApp/SMS se rellenan con el nombre de la campaña.
+    const subject  = body.channel === 'email' ? body.subject   : (body.subject   || body.name)
+    const fromName = body.channel === 'email' ? body.from_name : (body.from_name || body.name)
+
     const [campaign] = await sql`
-      INSERT INTO campaigns (client_id, name, subject, from_name, reply_to, html_content, text_content, list_id, strategy, scheduled_at, settings, total_recipients)
+      INSERT INTO campaigns (
+        client_id, name, channel, subject, from_name, reply_to, html_content, text_content,
+        content_text, media_url, media_caption, list_id, strategy, scheduled_at, settings, total_recipients
+      )
       VALUES (
-        ${req.user.sub}, ${body.name}, ${body.subject}, ${body.from_name},
-        ${body.reply_to ?? null}, ${body.html_content}, ${body.text_content ?? null},
+        ${req.user.sub}, ${body.name}, ${body.channel}, ${subject}, ${fromName},
+        ${body.reply_to ?? null}, ${body.html_content ?? null}, ${body.text_content ?? null},
+        ${body.content_text ?? null}, ${body.media_url || null}, ${body.media_caption ?? null},
         ${body.list_id}, ${body.strategy}, ${body.scheduled_at ?? null},
         ${sql.json(body.settings)}, ${list.total_count}
       )
@@ -72,7 +97,7 @@ export async function campaignsRoutes(fastify) {
       return reply.code(400).send({ error: 'Solo se pueden editar campanas en borrador o programadas' })
     }
 
-    const body = campaignSchema.partial().parse(req.body)
+    const body = campaignBase.partial().parse(req.body)
     const [campaign] = await sql`
       UPDATE campaigns SET name = COALESCE(${body.name ?? null}, name),
         subject = COALESCE(${body.subject ?? null}, subject),
@@ -220,7 +245,7 @@ export async function campaignsRoutes(fastify) {
     if (!campaign) return reply.code(404).send({ error: 'Campana no encontrada' })
 
     const jobs = await sql`
-      SELECT c.email, c.first_name, c.last_name, cj.status, cj.sent_at, cj.error_message
+      SELECT cj.recipient_email AS email, c.first_name, c.last_name, cj.status, cj.sent_at, cj.error_message
       FROM campaign_jobs cj
       JOIN contacts c ON c.id = cj.contact_id
       WHERE cj.campaign_id = ${req.params.id}

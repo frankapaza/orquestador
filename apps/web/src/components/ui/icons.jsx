@@ -3,7 +3,7 @@
 export {
   // Navegación
   LayoutDashboard, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
-  ArrowLeft, ArrowRight, LogOut, Menu,
+  ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownLeft, LogOut, Menu,
   // Comunicaciones
   MessageCircle, MessageSquare, Inbox, Send, Megaphone, Mail,
   // Canales
@@ -16,15 +16,15 @@ export {
   // Estado
   Circle, AlertCircle, AlertTriangle, Info, Loader2,
   // Datos
-  BarChart2, BarChart3, TrendingUp, TrendingDown, PieChart,
+  BarChart2, BarChart3, TrendingUp, TrendingDown, PieChart, Gauge,
   // Contenido
   FileText, Folder, FolderOpen, BookOpen, ClipboardList,
   // Admin / Sistema
-  Settings, Shield, Key, Lock, Unlock, Users, User, UserPlus,
+  Settings, Shield, Key, Lock, Unlock, Users, User, UserPlus, Server,
   // Conectividad
   Globe, Link2, Webhook, Plug, Zap, Radio,
   // UI
-  QrCode, Camera, ScanLine, Image, Paperclip, Filter,
+  QrCode, Camera, ScanLine, Image, Paperclip, Filter, Mic,
   ExternalLink, Star, Bell, Calendar, Clock,
   // Canales específicos
   Hash, AtSign,

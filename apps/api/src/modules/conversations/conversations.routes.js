@@ -129,10 +129,12 @@ export async function conversationsRoutes(fastify) {
 
   // Listar conversaciones (inbox)
   fastify.get('/conversations', { onRequest: pre }, async (req) => {
-    const { channel, status = 'open', page = 1, limit = 30 } = req.query
+    const { channel, status = 'open', account, page = 1, limit = 30 } = req.query
     const offset = (page - 1) * limit
 
-    const channelFilter = channel ? sql`AND c.channel = ${channel}` : sql``
+    const channelFilter   = channel ? sql`AND c.channel = ${channel}` : sql``
+    const statusFilter    = (status && status !== 'all') ? sql`AND c.status = ${status}` : sql``
+    const accountIdFilter = account ? sql`AND c.account_id::text = ${account}` : sql``
 
     // Asesores: filtrar solo conversaciones de sus canales asignados
     let accountFilter = sql``
@@ -156,7 +158,9 @@ export async function conversationsRoutes(fastify) {
         c.*,
         m.body        AS last_body,
         m.direction   AS last_direction,
-        m.created_at  AS last_message_created_at
+        m.created_at  AS last_message_created_at,
+        COALESCE(wa.name, sa.name)                 AS account_name,
+        COALESCE(wa.phone_number, sa.phone_number) AS account_phone
       FROM conversations c
       LEFT JOIN LATERAL (
         SELECT body, direction, created_at
@@ -165,9 +169,12 @@ export async function conversationsRoutes(fastify) {
         ORDER BY created_at DESC
         LIMIT 1
       ) m ON true
+      LEFT JOIN whatsapp_accounts wa ON wa.id = c.account_id AND c.account_type = 'whatsapp'
+      LEFT JOIN sms_accounts      sa ON sa.id = c.account_id AND c.account_type = 'sms'
       WHERE c.client_id = ${req.user.sub}
-        AND c.status = ${status}
+        ${statusFilter}
         ${channelFilter}
+        ${accountIdFilter}
         ${accountFilter}
       ORDER BY c.last_message_at DESC NULLS LAST
       LIMIT ${limit} OFFSET ${offset}
@@ -177,8 +184,13 @@ export async function conversationsRoutes(fastify) {
   // Detalle de una conversación + sus mensajes
   fastify.get('/conversations/:id', { onRequest: pre }, async (req) => {
     const [conv] = await sql`
-      SELECT * FROM conversations
-      WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+      SELECT c.*,
+        COALESCE(wa.name, sa.name)                 AS account_name,
+        COALESCE(wa.phone_number, sa.phone_number) AS account_phone
+      FROM conversations c
+      LEFT JOIN whatsapp_accounts wa ON wa.id = c.account_id AND c.account_type = 'whatsapp'
+      LEFT JOIN sms_accounts      sa ON sa.id = c.account_id AND c.account_type = 'sms'
+      WHERE c.id = ${req.params.id} AND c.client_id = ${req.user.sub}
     `
     if (!conv) return req.server.httpErrors?.notFound() ?? { error: 'No encontrada' }
 

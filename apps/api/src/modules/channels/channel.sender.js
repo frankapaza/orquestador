@@ -2,6 +2,7 @@ import { sql } from '../../lib/db.js'
 import { EvolutionAdapter } from './adapters/evolution.adapter.js'
 import { AndroidSmsAdapter } from './adapters/android-sms.adapter.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
+import { fullPhone } from '../../lib/phone.js'
 
 function isWithinActiveHours(account) {
   const now = new Date()
@@ -42,7 +43,8 @@ export async function pickSmsAccount(clientId) {
 }
 
 export async function sendWhatsapp({ campaign, contact, account }) {
-  const phone = contact.phone ?? contact.metadata?.phone ?? null
+  // El número se guarda separado (phone_dial + phone). Aquí se concatena el completo.
+  const phone = fullPhone(contact) ?? contact.metadata?.phone ?? null
   if (!phone) throw new Error('Contacto sin número de teléfono')
 
   const payload = {
@@ -73,7 +75,7 @@ export async function sendWhatsapp({ campaign, contact, account }) {
 export async function sendSms({ campaign, contact, account }) {
   const adapter = new AndroidSmsAdapter(account)
 
-  const phone = contact.metadata?.phone ?? contact.phone_number ?? null
+  const phone = contact.metadata?.phone ?? fullPhone(contact) ?? contact.phone_number ?? null
   if (!phone) throw new Error('Contacto sin número de teléfono')
 
   const result = await adapter.send({ to: phone, body: campaign.content_text })
