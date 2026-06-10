@@ -60,4 +60,31 @@ export class AndroidSmsAdapter {
     }
     return this.#request('GET', '/health')
   }
+
+  // ── Webhooks del gateway (SMS entrantes) ──────────────────────────────
+  // El gateway (cloud o local) reenvía cada SMS recibido a la URL que le
+  // registremos aquí. Kubo la registra apuntando a /webhooks/sms/<accountId>.
+
+  async listWebhooks() {
+    return this.#request('GET', '/webhooks')
+  }
+
+  // Idempotente: si ya existe un webhook con la misma url+event no lo duplica.
+  async registerWebhook(url, event = 'sms:received') {
+    const existing = await this.listWebhooks().catch(() => [])
+    if (Array.isArray(existing)) {
+      const dup = existing.find(w => w.url === url && w.event === event)
+      if (dup) return dup
+    }
+    return this.#request('POST', '/webhooks', { url, event })
+  }
+
+  // Borra del gateway todos los webhooks que apunten a esa URL.
+  async deleteWebhookByUrl(url) {
+    const existing = await this.listWebhooks().catch(() => [])
+    if (!Array.isArray(existing)) return
+    for (const w of existing.filter(w => w.url === url)) {
+      await this.#request('DELETE', `/webhooks/${w.id}`).catch(() => {})
+    }
+  }
 }

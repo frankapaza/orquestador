@@ -1,6 +1,36 @@
 import { z } from 'zod'
 import { sql } from '../../lib/db.js'
+import { env } from '../../config/env.js'
 import { AndroidSmsAdapter } from '../channels/adapters/android-sms.adapter.js'
+
+// URL pública a la que el gateway debe reenviar los SMS entrantes de esta cuenta.
+function webhookUrlFor(accountId) {
+  return `${env.TRACKING_BASE_URL.replace(/\/$/, '')}/webhooks/sms/${accountId}`
+}
+
+// Registra (best-effort) el webhook de SMS entrante en el gateway de la cuenta.
+// No lanza: si el gateway está offline o falla, solo se loguea — el alta/edición
+// de la cuenta no debe romperse por esto.
+async function syncIncomingWebhook(fastify, account) {
+  try {
+    const adapter = new AndroidSmsAdapter(account)
+    await adapter.registerWebhook(webhookUrlFor(account.id), 'sms:received')
+    fastify.log.info(`[SMS] Webhook entrante registrado en gateway para cuenta ${account.id}`)
+  } catch (err) {
+    fastify.log.warn({ err }, `[SMS] No se pudo registrar el webhook entrante para cuenta ${account.id}`)
+  }
+}
+
+// Borra (best-effort) el webhook de SMS entrante del gateway de la cuenta.
+async function removeIncomingWebhook(fastify, account) {
+  try {
+    const adapter = new AndroidSmsAdapter(account)
+    await adapter.deleteWebhookByUrl(webhookUrlFor(account.id))
+    fastify.log.info(`[SMS] Webhook entrante eliminado del gateway para cuenta ${account.id}`)
+  } catch (err) {
+    fastify.log.warn({ err }, `[SMS] No se pudo eliminar el webhook entrante para cuenta ${account.id}`)
+  }
+}
 
 const createSchema = z.object({
   name:               z.string().min(1),
@@ -72,6 +102,10 @@ export async function smsRoutes(fastify) {
                 active_hours_start, active_hours_end, is_online, is_active,
                 assigned_member_id, created_at
     `
+
+    // Registrar el webhook de SMS entrante en el gateway automáticamente.
+    await syncIncomingWebhook(fastify, { id: account.id, gateway_url: body.gateway_url, api_key: body.api_key ?? null })
+
     return reply.code(201).send(account)
   })
 
@@ -89,6 +123,15 @@ export async function smsRoutes(fastify) {
                 active_hours_start, active_hours_end, is_online, is_active, assigned_member_id
     `
     if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
+
+    // Si cambió la conexión al gateway (URL o credenciales), re-registrar el webhook.
+    if (body.gateway_url !== undefined || body.api_key !== undefined) {
+      const [full] = await sql`
+        SELECT id, gateway_url, api_key FROM sms_accounts WHERE id = ${req.params.id}
+      `
+      if (full) await syncIncomingWebhook(fastify, full)
+    }
+
     return account
   })
 
@@ -110,11 +153,20 @@ export async function smsRoutes(fastify) {
   // Eliminar cuenta (solo admin)
   fastify.delete('/sms/accounts/:id', { onRequest: pre }, async (req, reply) => {
     if (req.user.member_id) return reply.code(403).send({ error: 'Solo el administrador puede eliminar cuentas' })
-    const result = await sql`
+
+    // Leer la cuenta antes de borrarla para poder limpiar su webhook en el gateway.
+    const [account] = await sql`
+      SELECT id, gateway_url, api_key FROM sms_accounts
+      WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
+
+    await removeIncomingWebhook(fastify, account)
+
+    await sql`
       DELETE FROM sms_accounts
       WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
     `
-    if (result.count === 0) return reply.code(404).send({ error: 'Cuenta no encontrada' })
     return { ok: true }
   })
 
