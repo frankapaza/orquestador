@@ -420,6 +420,8 @@ export async function contactsRoutes(fastify) {
         m.from_number,
         m.to_number,
         m.campaign_id,
+        conv.account_id                            AS account_id,
+        conv.account_type                          AS account_type,
         COALESCE(wa.name, sa.name)                 AS account_name,
         COALESCE(wa.phone_number, sa.phone_number) AS account_phone
       FROM messages m
