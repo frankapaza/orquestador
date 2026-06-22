@@ -1,5 +1,6 @@
 import { sql } from '../../lib/db.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
+import { bus } from '../../lib/eventBus.js'
 
 async function upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType }) {
   const [conv] = await sql`
@@ -104,6 +105,14 @@ export async function incomingWebhooksRoutes(fastify) {
           media_url:        mediaUrl,
           received_at:      msg.created_at,
         })
+
+        // Push en vivo al frontend (Inbox)
+        bus.emit(account.client_id, {
+          type:            'message:new',
+          conversation_id: conv.id,
+          message:         msg,
+          channel:         'whatsapp',
+        })
       }
     }
 
@@ -119,15 +128,28 @@ export async function incomingWebhooksRoutes(fastify) {
         if (newStatus === 'delivered') updateData.delivered_at = new Date()
         if (newStatus === 'read')      updateData.read_at = new Date()
 
-        await sql`
+        const [updated] = await sql`
           UPDATE messages SET ${sql(updateData, ...Object.keys(updateData))}
           WHERE external_id = ${u.key.id} AND client_id = ${account.client_id}
+          RETURNING id, conversation_id, status, delivered_at, read_at
         `
 
         if (newStatus === 'read') {
           await dispatchWebhook(account.client_id, 'message.read', {
             channel:     'whatsapp',
             external_id: u.key.id,
+          })
+        }
+
+        // Push en vivo al frontend para que pinte los checks correctos
+        if (updated) {
+          bus.emit(account.client_id, {
+            type:            'message:status',
+            conversation_id: updated.conversation_id,
+            message_id:      updated.id,
+            status:          newStatus,
+            delivered_at:    updated.delivered_at,
+            read_at:         updated.read_at,
           })
         }
       }
@@ -190,6 +212,14 @@ export async function incomingWebhooksRoutes(fastify) {
         contact_phone:    contactPhone,
         body,
         received_at:      msg.created_at,
+      })
+
+      // Push en vivo al frontend
+      bus.emit(account.client_id, {
+        type:            'message:new',
+        conversation_id: conv.id,
+        message:         msg,
+        channel:         'sms',
       })
     }
 

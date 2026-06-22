@@ -5,6 +5,7 @@ import { EvolutionAdapter } from '../channels/adapters/evolution.adapter.js'
 import { AndroidSmsAdapter } from '../channels/adapters/android-sms.adapter.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
+import { bus } from '../../lib/eventBus.js'
 import { join, dirname, extname } from 'path'
 import { fileURLToPath } from 'url'
 import { createWriteStream } from 'fs'
@@ -281,7 +282,41 @@ export async function conversationsRoutes(fastify) {
       })
     }
 
+    // Push en vivo a todas las pestañas/agentes del mismo cliente.
+    bus.emit(conv.client_id, {
+      type:            'message:new',
+      conversation_id: conv.id,
+      message:         msg,
+      channel:         conv.channel,
+    })
+
     return reply.code(error ? 500 : 201).send({ ...msg, error })
+  })
+
+  // Marcar los mensajes inbound de una conversación como leídos POR el operador
+  // del Inbox. NO confundir con el "read" del webhook (que es cuando el cliente
+  // del cliente lee nuestro outbound).
+  fastify.post('/conversations/:id/read', { onRequest: pre }, async (req, reply) => {
+    const [conv] = await sql`
+      SELECT id, client_id FROM conversations
+      WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!conv) return reply.code(404).send({ error: 'Conversación no encontrada' })
+
+    await sql`
+      UPDATE messages SET read_at = COALESCE(read_at, now())
+      WHERE conversation_id = ${conv.id}
+        AND direction = 'inbound'
+        AND read_at IS NULL
+    `
+    await sql`UPDATE conversations SET unread_count = 0 WHERE id = ${conv.id}`
+
+    bus.emit(conv.client_id, {
+      type:            'conversation:read',
+      conversation_id: conv.id,
+    })
+
+    return { ok: true }
   })
 
   // Cambiar estado de conversación

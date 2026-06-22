@@ -27,6 +27,7 @@ import { incomingWebhooksRoutes } from './modules/channels/incoming-webhooks.rou
 import { webhookSubscriptionsRoutes } from './modules/webhook-subscriptions/webhook-subscriptions.routes.js'
 import { templatesRoutes } from './modules/templates/templates.routes.js'
 import { docsRoutes }      from './modules/docs/docs.routes.js'
+import eventsRoutes        from './modules/events/events.routes.js'
 import { startCampaignWorker, enqueueCampaign } from './workers/campaign.queue.js'
 import { baileysManager } from './modules/whatsapp/baileys.manager.js'
 import { sql } from './lib/db.js'
@@ -68,6 +69,7 @@ fastify.register(conversationsRoutes, { prefix: API_PREFIX })
 fastify.register(webhookSubscriptionsRoutes, { prefix: API_PREFIX })
 fastify.register(templatesRoutes,           { prefix: API_PREFIX })
 fastify.register(docsRoutes,               { prefix: API_PREFIX })
+fastify.register(eventsRoutes,             { prefix: API_PREFIX })
 
 // Tracking, webhooks y canales entrantes (URLs públicas sin versión)
 fastify.register(trackingRoutes)

@@ -554,29 +554,88 @@ export default function InboxPage() {
       ])
     })
   }, [])
+  // SSE: push del backend en vez de polling. Reconecta solo si la pestaña vuelve
+  // a estar visible. Fallback de polling cada 60s por si el stream se rompe.
   useEffect(() => {
-    const t = setInterval(loadConversations, 5000)
-    return () => clearInterval(t)
-  }, [loadConversations])
+    const token = typeof window !== 'undefined' ? localStorage.getItem('kubo_token') : null
+    if (!token) return
 
-  useEffect(() => {
-    const t = setInterval(async () => {
-      const convId = selectedIdRef.current
-      if (!convId) return
-      try {
-        const r = await api.get(`/conversations/${convId}`)
-        const newMsgs = r.data.messages ?? []
+    const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1').replace(/\/$/, '')
+    let es = null
+    let pollFallback = null
+    let cerrado = false
+
+    function aplicarEventoMensajeNuevo(payload) {
+      const convId = payload.conversation_id
+      const msg    = payload.message
+      // Si la conv abierta es la del mensaje, lo agrego al stream sin pedir nada.
+      if (selectedIdRef.current === convId && msg) {
         setMessages(prev => {
-          if (newMsgs.length === prev.length) return prev
-          if (newMsgs.length > prev.length) {
-            setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-            loadConversations()
-          }
-          return newMsgs
+          if (prev.some(m => m.id === msg.id)) return prev
+          setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+          return [...prev, msg]
         })
+      }
+      // Refrescar lista para mover la conv arriba + actualizar preview/unread.
+      loadConversations()
+    }
+
+    function aplicarEventoEstado(payload) {
+      const { message_id, status, delivered_at, read_at } = payload
+      setMessages(prev => prev.map(m =>
+        m.id === message_id ? { ...m, status, delivered_at, read_at } : m
+      ))
+    }
+
+    function aplicarEventoConvLeida(payload) {
+      setConversations(prev => prev.map(c =>
+        c.id === payload.conversation_id ? { ...c, unread_count: 0 } : c
+      ))
+    }
+
+    function abrir() {
+      if (cerrado) return
+      try {
+        es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`)
+        es.addEventListener('message:new',     e => aplicarEventoMensajeNuevo(JSON.parse(e.data)))
+        es.addEventListener('message:status',  e => aplicarEventoEstado(JSON.parse(e.data)))
+        es.addEventListener('conversation:read', e => aplicarEventoConvLeida(JSON.parse(e.data)))
+        es.onerror = () => {
+          // EventSource reintenta solo. Si lo hace muchas veces, activamos fallback de polling
+          // mientras tanto para no quedar a ciegas.
+          if (!pollFallback) {
+            pollFallback = setInterval(() => {
+              loadConversations()
+              const convId = selectedIdRef.current
+              if (convId) api.get(`/conversations/${convId}`).then(r => setMessages(r.data.messages ?? [])).catch(() => {})
+            }, 60000)
+          }
+        }
+        es.onopen = () => {
+          if (pollFallback) { clearInterval(pollFallback); pollFallback = null }
+        }
       } catch {}
-    }, 3000)
-    return () => clearInterval(t)
+    }
+
+    abrir()
+
+    function onVisibilityChange() {
+      if (document.hidden) {
+        es?.close(); es = null
+        if (pollFallback) { clearInterval(pollFallback); pollFallback = null }
+      } else if (!es) {
+        loadConversations() // refresco al volver
+        abrir()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
+    return () => {
+      cerrado = true
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      es?.close()
+      if (pollFallback) clearInterval(pollFallback)
+    }
   }, [loadConversations])
 
   useEffect(() => { selectedIdRef.current = selected?.id ?? null }, [selected])
@@ -586,7 +645,9 @@ export default function InboxPage() {
     const r = await api.get(`/conversations/${conv.id}`)
     setSelected(r.data)
     setMessages(r.data.messages ?? [])
-    loadConversations()
+    // Marca inbound como leídos POR el operador. El backend además emite
+    // conversation:read para sincronizar otras pestañas / agentes.
+    api.post(`/conversations/${conv.id}/read`).catch(() => {})
     setTimeout(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); inputRef.current?.focus() }, 100)
   }
 
@@ -614,14 +675,15 @@ export default function InboxPage() {
         mediaUrl = r.data.url; mediaType = r.data.type; mediaCaption = replyText.trim() || attachPreview.filename
         setUploading(false)
       }
-      await api.post(`/conversations/${selected.id}/reply`, {
+      const r = await api.post(`/conversations/${selected.id}/reply`, {
         body: attachPreview ? undefined : replyText.trim(),
         media_url: mediaUrl ?? undefined, media_type: mediaType ?? undefined, media_caption: mediaCaption ?? undefined,
       })
       setReplyText(''); clearAttach()
-      const r = await api.get(`/conversations/${selected.id}`)
-      setMessages(r.data.messages ?? [])
-      loadConversations()
+      // Agrega el msg al stream sin esperar el SSE (que igual llegará y se dedupa por id).
+      if (r?.data?.id) {
+        setMessages(prev => prev.some(m => m.id === r.data.id) ? prev : [...prev, r.data])
+      }
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
     } catch (err) {
       alert('Error: ' + (err.response?.data?.error ?? err.message))
