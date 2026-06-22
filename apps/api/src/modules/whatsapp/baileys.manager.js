@@ -14,6 +14,7 @@ import crypto from 'crypto'
 import pino from 'pino'
 import { sql } from '../../lib/db.js'
 import { processIncoming, updateMessageStatus } from '../channels/message.service.js'
+import { bus } from '../../lib/eventBus.js'
 
 const __dirname  = dirname(fileURLToPath(import.meta.url))
 const SESSIONS_DIR = join(__dirname, '..', '..', '..', 'sessions')
@@ -257,6 +258,39 @@ class BaileysManager {
         await updateMessageStatus(acc.client_id, key.id, st)
       }
     })
+
+    // Presencia del contacto (online / escribiendo / grabando / última vez).
+    // Solo dispara para JIDs a los que hicimos presenceSubscribe() — eso lo hace
+    // el endpoint /conversations/:id/presence-subscribe cuando el operador abre
+    // la conversación. Sin suscripción Baileys no emite este evento.
+    sock.ev.on('presence.update', async ({ id, presences }) => {
+      const [acc] = await sql`SELECT id, client_id FROM whatsapp_accounts WHERE instance_name = ${name}`
+      if (!acc || !presences) return
+      const contactPhone = id.split('@')[0]
+      // presences es { jidParticipante: { lastKnownPresence, lastSeen } }
+      const entry = presences[id] ?? Object.values(presences)[0]
+      if (!entry) return
+      const presence = entry.lastKnownPresence ?? null  // available|unavailable|composing|recording|paused
+      const lastSeen = entry.lastSeen ? new Date(entry.lastSeen * 1000) : null
+      try {
+        await sql`
+          UPDATE conversations
+          SET presence = ${presence},
+              last_seen_at = COALESCE(${lastSeen}, last_seen_at),
+              presence_updated_at = now()
+          WHERE client_id = ${acc.client_id}
+            AND account_id = ${acc.id}
+            AND contact_phone = ${contactPhone}
+        `
+      } catch {}
+      bus.emit(acc.client_id, {
+        type:           'presence:update',
+        contact_phone:  contactPhone,
+        account_id:     acc.id,
+        presence,
+        last_seen_at:   lastSeen,
+      })
+    })
   }
 
   async stopSession(name) {
@@ -293,6 +327,17 @@ class BaileysManager {
 
   getError(name) {
     return this.sessions.get(name)?.error ?? null
+  }
+
+  // Suscribe al monitoreo de presencia de un contacto. Sin esto, sock.ev.on('presence.update')
+  // no dispara. Hay que llamarlo cada vez que el operador abre una conversación.
+  async subscribePresence(name, phone) {
+    const s = this.sessions.get(name)
+    if (!s?.socket || s.status !== 'connected') return false
+    try {
+      await s.socket.presenceSubscribe(this.toJid(phone))
+      return true
+    } catch { return false }
   }
 
   async send(name, { to, body, mediaUrl, mediaType, mediaCaption }) {

@@ -499,6 +499,25 @@ function MediaContent({ msg, isOut }) {
   return null
 }
 
+// Etiqueta de presencia tipo WhatsApp ("en línea", "escribiendo...", "últ. vez hoy 14:30").
+function PresenceLabel({ presence }) {
+  if (!presence) return null
+  const { presence: p, last_seen_at } = presence
+  if (p === 'composing') return <span className="flex items-center gap-1 text-jungle-green-600"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-jungle-green-600" />escribiendo…</span>
+  if (p === 'recording') return <span className="flex items-center gap-1 text-jungle-green-600"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-jungle-green-600" />grabando audio…</span>
+  if (p === 'available') return <span className="flex items-center gap-1 text-jungle-green-600"><span className="h-1.5 w-1.5 rounded-full bg-jungle-green-500" />en línea</span>
+  if (last_seen_at) {
+    const d = new Date(last_seen_at)
+    const ahora = new Date()
+    const hoy = d.toDateString() === ahora.toDateString()
+    const txt = hoy
+      ? `hoy ${d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`
+      : d.toLocaleDateString('es', { day: '2-digit', month: '2-digit' }) + ` ${d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`
+    return <span>últ. vez {txt}</span>
+  }
+  return null
+}
+
 // ── Página principal ─────────────────────────────────────────────────────────
 const STATUS_FILTERS = [
   { key: 'open',   label: 'Abiertas' },
@@ -531,6 +550,7 @@ export default function InboxPage() {
   const selectedIdRef   = useRef(null)
   const [attachPreview, setAttachPreview] = useState(null)
   const [uploading, setUploading]         = useState(false)
+  const [presence, setPresence]           = useState(null) // { presence, last_seen_at }
 
   const loadConversations = useCallback(() => {
     const params = new URLSearchParams()
@@ -593,6 +613,14 @@ export default function InboxPage() {
       ))
     }
 
+    function aplicarPresencia(payload) {
+      // Filtramos al contacto que esté abierto en el chat
+      const selPhone = selectedRef.current?.contact_phone
+      if (selPhone && selPhone === payload.contact_phone) {
+        setPresence({ presence: payload.presence, last_seen_at: payload.last_seen_at })
+      }
+    }
+
     function abrir() {
       if (cerrado) return
       try {
@@ -600,6 +628,7 @@ export default function InboxPage() {
         es.addEventListener('message:new',     e => aplicarEventoMensajeNuevo(JSON.parse(e.data)))
         es.addEventListener('message:status',  e => aplicarEventoEstado(JSON.parse(e.data)))
         es.addEventListener('conversation:read', e => aplicarEventoConvLeida(JSON.parse(e.data)))
+        es.addEventListener('presence:update', e => aplicarPresencia(JSON.parse(e.data)))
         es.onerror = () => {
           // EventSource reintenta solo. Si lo hace muchas veces, activamos fallback de polling
           // mientras tanto para no quedar a ciegas.
@@ -638,16 +667,27 @@ export default function InboxPage() {
     }
   }, [loadConversations])
 
-  useEffect(() => { selectedIdRef.current = selected?.id ?? null }, [selected])
+  const selectedRef = useRef(null)
+  useEffect(() => {
+    selectedIdRef.current = selected?.id ?? null
+    selectedRef.current = selected ?? null
+  }, [selected])
 
   async function openConversation(conv) {
     setSelected(conv)
+    setPresence(null) // reset hasta confirmar
     const r = await api.get(`/conversations/${conv.id}`)
     setSelected(r.data)
     setMessages(r.data.messages ?? [])
     // Marca inbound como leídos POR el operador. El backend además emite
     // conversation:read para sincronizar otras pestañas / agentes.
     api.post(`/conversations/${conv.id}/read`).catch(() => {})
+    // Solo WhatsApp tiene presencia. Le decimos a Baileys "avisame de este contacto".
+    if (conv.channel === 'whatsapp') {
+      api.post(`/conversations/${conv.id}/presence-subscribe`)
+        .then(res => setPresence({ presence: res.data?.presence, last_seen_at: res.data?.last_seen_at }))
+        .catch(() => {})
+    }
     setTimeout(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); inputRef.current?.focus() }, 100)
   }
 
@@ -847,6 +887,7 @@ export default function InboxPage() {
                   <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                     <span className="font-mono">{selected.contact_phone}</span>
                     {selected.account_name && <span className="flex items-center gap-1"><PhoneCall size={10} /> vía {selected.account_name}</span>}
+                    {selected.channel === 'whatsapp' && <PresenceLabel presence={presence} />}
                   </div>
                 </div>
               </div>

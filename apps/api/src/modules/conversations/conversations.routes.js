@@ -293,6 +293,33 @@ export async function conversationsRoutes(fastify) {
     return reply.code(error ? 500 : 201).send({ ...msg, error })
   })
 
+  // Suscribe al monitoreo de presencia del contacto de esta conversación.
+  // Lo dispara el frontend al abrir la conv (una sola vez). Devuelve el último
+  // estado conocido para mostrarlo de inmediato.
+  fastify.post('/conversations/:id/presence-subscribe', { onRequest: pre }, async (req, reply) => {
+    const [conv] = await sql`
+      SELECT c.id, c.contact_phone, c.presence, c.last_seen_at, c.presence_updated_at,
+             wa.instance_name, wa.provider
+      FROM conversations c
+      LEFT JOIN whatsapp_accounts wa ON wa.id = c.account_id AND c.channel = 'whatsapp'
+      WHERE c.id = ${req.params.id} AND c.client_id = ${req.user.sub}
+    `
+    if (!conv) return reply.code(404).send({ error: 'Conversación no encontrada' })
+
+    if (conv.provider === 'baileys' && conv.instance_name) {
+      try {
+        await baileysManager.subscribePresence(conv.instance_name, conv.contact_phone)
+      } catch {}
+    }
+
+    return {
+      contact_phone: conv.contact_phone,
+      presence:      conv.presence,
+      last_seen_at:  conv.last_seen_at,
+      updated_at:    conv.presence_updated_at,
+    }
+  })
+
   // Marcar los mensajes inbound de una conversación como leídos POR el operador
   // del Inbox. NO confundir con el "read" del webhook (que es cuando el cliente
   // del cliente lee nuestro outbound).

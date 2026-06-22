@@ -1,5 +1,6 @@
 import { sql } from '../../lib/db.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
+import { bus } from '../../lib/eventBus.js'
 
 export async function upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType }) {
   const [conv] = await sql`
@@ -45,6 +46,14 @@ export async function processIncoming({ clientId, channel, accountId, accountTyp
     body, media_url: mediaUrl, received_at: msg.created_at,
   })
 
+  // Push en vivo al Inbox (SSE).
+  bus.emit(clientId, {
+    type:            'message:new',
+    conversation_id: conv.id,
+    message:         msg,
+    channel,
+  })
+
   return { conv, msg }
 }
 
@@ -53,9 +62,22 @@ export async function updateMessageStatus(clientId, externalId, status) {
   if (status === 'delivered') updates.delivered_at = new Date()
   if (status === 'read')      updates.read_at = new Date()
 
-  await sql`
+  const [updated] = await sql`
     UPDATE messages
     SET ${sql(updates, ...Object.keys(updates))}
     WHERE external_id = ${externalId} AND client_id = ${clientId}
+    RETURNING id, conversation_id, status, delivered_at, read_at
   `
+
+  // Push del cambio de check para que el frontend lo pinte sin polling.
+  if (updated) {
+    bus.emit(clientId, {
+      type:            'message:status',
+      conversation_id: updated.conversation_id,
+      message_id:      updated.id,
+      status:          updated.status,
+      delivered_at:    updated.delivered_at,
+      read_at:         updated.read_at,
+    })
+  }
 }
