@@ -249,13 +249,35 @@ class BaileysManager {
       }
     })
 
-    // Estado de mensajes enviados
+    // Estado de mensajes enviados — Baileys lo emite por DOS vías distintas:
+    //   1. messages.update     → trae update.status (1=ERROR 2=PENDING 3=SERVER_ACK 4=DELIVERY_ACK 5=READ 6=PLAYED)
+    //   2. message-receipt.update → trae receipt con receiptTimestamp / readTimestamp
+    // Hay que escuchar ambos porque WhatsApp Web vs WhatsApp móvil disparan
+    // distintos; depende también de privacidad del contacto.
+    sock.ev.on('messages.update', async (updates) => {
+      const [acc] = await sql`SELECT id, client_id FROM whatsapp_accounts WHERE instance_name = ${name}`
+      if (!acc) return
+      for (const u of updates) {
+        const s = u.update?.status
+        if (!s || !u.key?.id) continue
+        const mapeo = { 3: 'sent', 4: 'delivered', 5: 'read', 6: 'read' }
+        const st = mapeo[s]
+        if (!st) continue
+        try { await updateMessageStatus(acc.client_id, u.key.id, st) }
+        catch (e) { console.error('[Baileys] updateMessageStatus error:', e.message) }
+      }
+    })
+
     sock.ev.on('message-receipt.update', async (updates) => {
-      const [acc] = await sql`SELECT * FROM whatsapp_accounts WHERE instance_name = ${name}`
+      const [acc] = await sql`SELECT id, client_id FROM whatsapp_accounts WHERE instance_name = ${name}`
       if (!acc) return
       for (const { key, receipt } of updates) {
-        const st = (receipt.readTimestamp || receipt.receiptTimestamp) ? 'read' : 'delivered'
-        await updateMessageStatus(acc.client_id, key.id, st)
+        if (!key?.id || !receipt) continue
+        // Si el receipt trae readTimestamp el contacto LEYÓ el mensaje.
+        // Si no, al menos llegó al device (delivered).
+        const st = receipt.readTimestamp ? 'read' : 'delivered'
+        try { await updateMessageStatus(acc.client_id, key.id, st) }
+        catch (e) { console.error('[Baileys] receipt update error:', e.message) }
       }
     })
 
