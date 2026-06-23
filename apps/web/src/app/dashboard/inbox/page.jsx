@@ -499,6 +499,42 @@ function MediaContent({ msg, isOut }) {
   return null
 }
 
+// Indicador de estado del mensaje saliente, idéntico al de WhatsApp.
+//   sending (optimista, sin ACK)  →  reloj
+//   sent     (server lo aceptó)   →  ✓ gris
+//   delivered (llegó al device)   →  ✓✓ gris
+//   read     (el contacto lo leyó)→  ✓✓ azul, un poco más juntas
+//   failed   (rebote)             →  ! rojo
+function MessageStatus({ status }) {
+  // El color se hereda del contenedor (text-jungle-green-100 dentro de la burbuja
+  // verde, text-muted-foreground en el sidebar). Solo el 'read' fuerza azul.
+  if (status === 'failed') {
+    return <span className="text-xs font-bold text-red-400" title="Error al enviar">!</span>
+  }
+  if (status === 'sending' || !status) {
+    return <Clock size={13} strokeWidth={1.75} className="opacity-70" title="Enviando…" />
+  }
+  if (status === 'sent') {
+    // Un solo check
+    return (
+      <svg viewBox="0 0 16 11" width="16" height="11" title="Enviado" aria-label="Enviado">
+        <path fill="currentColor" d="M11.071 1.0L4.95 7.121 1.929 4.1.515 5.514l4.435 4.435L12.485 2.414z" />
+      </svg>
+    )
+  }
+  if (status === 'delivered' || status === 'read') {
+    // Dos checks superpuestos (estilo WhatsApp). En 'read' forzamos azul WhatsApp.
+    const sty = status === 'read' ? { color: '#53bdeb' } : undefined
+    return (
+      <svg viewBox="0 0 18 11" width="18" height="11" style={sty} title={status === 'read' ? 'Visto' : 'Entregado'} aria-label={status}>
+        <path fill="currentColor" d="M11.071 1.0L4.95 7.121 1.929 4.1.515 5.514l4.435 4.435L12.485 2.414z" />
+        <path fill="currentColor" transform="translate(4 0)" d="M11.071 1.0L4.95 7.121 1.929 4.1.515 5.514l4.435 4.435L12.485 2.414z" />
+      </svg>
+    )
+  }
+  return null
+}
+
 // Etiqueta de presencia tipo WhatsApp ("en línea", "escribiendo...", "últ. vez hoy 14:30").
 function PresenceLabel({ presence }) {
   if (!presence) return null
@@ -596,14 +632,37 @@ export default function InboxPage() {
           return [...prev, msg]
         })
       }
-      // Refrescar lista para mover la conv arriba + actualizar preview/unread.
-      loadConversations()
+      // Actualizar la lista en memoria: mover conv arriba + refrescar preview/unread.
+      if (msg) {
+        setConversations(prev => {
+          const idx = prev.findIndex(c => c.id === convId)
+          if (idx < 0) { loadConversations(); return prev } // no la tenemos cargada, fallback
+          const c = {
+            ...prev[idx],
+            last_body:      msg.body,
+            last_direction: msg.direction,
+            last_status:    msg.status,
+            last_message_at: msg.created_at ?? new Date().toISOString(),
+            unread_count:   msg.direction === 'inbound' && selectedIdRef.current !== convId
+                              ? (prev[idx].unread_count ?? 0) + 1
+                              : prev[idx].unread_count ?? 0,
+          }
+          const sin = prev.filter((_, i) => i !== idx)
+          return [c, ...sin]
+        })
+      } else {
+        loadConversations()
+      }
     }
 
     function aplicarEventoEstado(payload) {
-      const { message_id, status, delivered_at, read_at } = payload
+      const { message_id, conversation_id, status, delivered_at, read_at } = payload
       setMessages(prev => prev.map(m =>
         m.id === message_id ? { ...m, status, delivered_at, read_at } : m
+      ))
+      // Sincroniza el sidebar: si este msg es el último de la conv, refleja el ✓/✓✓/✓✓ azul.
+      setConversations(prev => prev.map(c =>
+        c.id === conversation_id ? { ...c, last_status: status } : c
       ))
     }
 
@@ -847,8 +906,13 @@ export default function InboxPage() {
                     <span className={cn('shrink-0 text-[11px] tabular-nums', unread ? 'font-medium text-jungle-green-700' : 'text-muted-foreground')}>{timeLabel(conv.last_message_at)}</span>
                   </div>
                   <div className="mt-0.5 flex items-center justify-between gap-2">
-                    <p className={cn('truncate text-xs', unread ? 'text-foreground' : 'text-muted-foreground')}>
-                      {conv.last_direction === 'outbound' ? '✓ ' : ''}{conv.last_body ?? '📎 Archivo'}
+                    <p className={cn('flex min-w-0 items-center gap-1 truncate text-xs', unread ? 'text-foreground' : 'text-muted-foreground')}>
+                      {conv.last_direction === 'outbound' && (
+                        <span className={conv.last_status === 'read' ? 'text-[#53bdeb]' : 'text-muted-foreground'}>
+                          <MessageStatus status={conv.last_status ?? 'sent'} />
+                        </span>
+                      )}
+                      <span className="truncate">{conv.last_body ?? '📎 Archivo'}</span>
                     </p>
                     {unread && <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-jungle-green-600 px-1 text-[11px] font-semibold text-white">{conv.unread_count}</span>}
                   </div>
@@ -919,15 +983,7 @@ export default function InboxPage() {
                         {msg.body && <p className="break-words text-sm leading-relaxed">{msg.body}</p>}
                         <div className={`mt-0.5 flex items-center justify-end gap-1 ${isOut ? 'text-jungle-green-100' : 'text-muted-foreground'}`}>
                           <span className="text-xs">{new Date(msg.created_at).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}</span>
-                          {isOut && (
-                            <span className="text-xs" title={msg.status}>
-                              {msg.status === 'read' ? <span className="text-white">✓✓</span>
-                                : msg.status === 'delivered' ? <span className="text-jungle-green-100">✓✓</span>
-                                : msg.status === 'sent' ? <span className="text-jungle-green-100 opacity-70">✓</span>
-                                : msg.status === 'failed' ? <span className="text-red-300">✕</span>
-                                : <span className="opacity-50">⏳</span>}
-                            </span>
-                          )}
+                          {isOut && <MessageStatus status={msg.status} />}
                         </div>
                       </div>
                     </div>

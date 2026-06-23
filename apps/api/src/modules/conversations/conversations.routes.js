@@ -159,12 +159,13 @@ export async function conversationsRoutes(fastify) {
         c.*,
         m.body        AS last_body,
         m.direction   AS last_direction,
+        m.status      AS last_status,
         m.created_at  AS last_message_created_at,
         COALESCE(wa.name, sa.name)                 AS account_name,
         COALESCE(wa.phone_number, sa.phone_number) AS account_phone
       FROM conversations c
       LEFT JOIN LATERAL (
-        SELECT body, direction, created_at
+        SELECT body, direction, status, created_at
         FROM messages
         WHERE conversation_id = c.id
         ORDER BY created_at DESC
