@@ -12,6 +12,7 @@ import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
 import { sql } from '../../lib/db.js'
 import { bus } from '../../lib/eventBus.js'
+import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
 
 function log(msg)  { console.log('[IMAP] ' + msg) }
 function logErr(m) { console.error('[IMAP] ' + m) }
@@ -213,9 +214,8 @@ class ImapManager {
 
     log(`${account.email} ← respuesta de ${fromAddr} (contacto ${contactId ?? 'desconocido'})`)
 
-    // Empuja en vivo al dashboard (SSE).
-    bus.emit(account.client_id, {
-      type: 'email:inbound',
+    const payloadEvento = {
+      channel: 'email',
       id: row.id,
       contact_id: contactId,
       account_email: account.email,
@@ -227,7 +227,13 @@ class ImapManager {
       message_id: messageId,
       transactional_email_id: tx?.id ?? null,
       received_at: received,
-    })
+    }
+
+    // Empuja en vivo al dashboard del Orquestador (SSE).
+    bus.emit(account.client_id, { type: 'email:inbound', ...payloadEvento })
+
+    // Notifica a sistemas externos (MCOB) en tiempo real vía webhook.
+    dispatchWebhook(account.client_id, 'email.received', payloadEvento).catch(() => {})
   }
 }
 

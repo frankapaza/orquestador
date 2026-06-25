@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { sql } from '../../lib/db.js'
 
-const VALID_EVENTS = ['message.received', 'message.sent', 'message.delivered', 'message.read', 'conversation.created']
+const VALID_EVENTS = ['message.received', 'message.sent', 'message.delivered', 'message.read', 'conversation.created', 'email.received']
 
 const createSchema = z.object({
   name:   z.string().min(1),
