@@ -615,9 +615,11 @@ function describeEvent(event, contactName) {
       return {
         icon: <ArrowUpRight size={13} />, color: 'text-amber-600', label: 'Email enviado',
         who: `Para ${event.email ?? contactName}`,
-        origin: event.reference === 'Correo individual'
-          ? 'Correo individual'
-          : (event.reference ? `Campaña «${event.reference}»` : null),
+        origin: event.from_email
+          ? `Desde ${event.from_email}`
+          : (event.reference === 'Correo individual'
+              ? 'Correo individual'
+              : (event.reference ? `Campaña «${event.reference}»` : null)),
       }
     case 'email_received':
       return {
