@@ -72,11 +72,11 @@ function Sparkline({ data, id }) {
     <AreaChart width={96} height={40} data={data} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1f7c62" stopOpacity={0.35} />
-          <stop offset="100%" stopColor="#1f7c62" stopOpacity={0} />
+          <stop offset="0%" stopColor="#2c6c8c" stopOpacity={0.35} />
+          <stop offset="100%" stopColor="#2c6c8c" stopOpacity={0} />
         </linearGradient>
       </defs>
-      <Area type="monotone" dataKey="v" stroke="#1f7c62" strokeWidth={2} fill={`url(#${id})`} dot={false} isAnimationActive={false} />
+      <Area type="monotone" dataKey="v" stroke="#2c6c8c" strokeWidth={2} fill={`url(#${id})`} dot={false} isAnimationActive={false} />
     </AreaChart>
   )
 }
@@ -271,20 +271,20 @@ export default function DashboardPage() {
                 <AreaChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
                   <defs>
                     <linearGradient id="area-wa" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#1f7c62" stopOpacity={0.28} />
-                      <stop offset="100%" stopColor="#1f7c62" stopOpacity={0} />
+                      <stop offset="0%" stopColor="#2c6c8c" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="#2c6c8c" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="area-sms" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#84d1b5" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#84d1b5" stopOpacity={0} />
+                      <stop offset="0%" stopColor="#86c5da" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#86c5da" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                   <XAxis dataKey="day" tickLine={false} axisLine={false} height={42} interval={0} tick={<DateTick data={chartData} />} />
                   <YAxis tickLine={false} axisLine={false} width={36} allowDecimals={false} tick={{ fontSize: 12, fill: '#71717a' }} />
-                  <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#84d1b5', strokeWidth: 1 }} />
-                  <Area type="monotone" dataKey="whatsapp" name="WhatsApp" stroke="#1f7c62" strokeWidth={2} fill="url(#area-wa)" />
-                  <Area type="monotone" dataKey="sms" name="SMS" stroke="#84d1b5" strokeWidth={2} fill="url(#area-sms)" />
+                  <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#86c5da', strokeWidth: 1 }} />
+                  <Area type="monotone" dataKey="whatsapp" name="WhatsApp" stroke="#2c6c8c" strokeWidth={2} fill="url(#area-wa)" />
+                  <Area type="monotone" dataKey="sms" name="SMS" stroke="#86c5da" strokeWidth={2} fill="url(#area-sms)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
