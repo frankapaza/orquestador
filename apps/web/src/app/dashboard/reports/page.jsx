@@ -22,8 +22,8 @@ const STATUS_COLOR = {
 }
 const CHANNEL_META = {
   email:    { label: 'Email',    Icon: Mail,          cls: 'bg-amber-100 text-amber-700' },
-  whatsapp: { label: 'WhatsApp', Icon: MessageCircle, cls: 'bg-jungle-green-100 text-jungle-green-700' },
-  sms:      { label: 'SMS',      Icon: Smartphone,    cls: 'bg-blue-100 text-blue-700' },
+  whatsapp: { label: 'WhatsApp', Icon: MessageCircle, cls: 'bg-green-100 text-green-700' },
+  sms:      { label: 'SMS',      Icon: Smartphone,    cls: 'bg-violet-100 text-violet-700' },
 }
 
 export default function ReportsPage() {

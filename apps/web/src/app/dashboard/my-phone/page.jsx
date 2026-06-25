@@ -218,9 +218,9 @@ export default function MyPhonePage() {
               </div>
             )}
             {qrData?.status === 'connected' && (
-              <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-jungle-green-100 bg-jungle-green-50 p-3 text-center">
-                <CheckCircle size={16} strokeWidth={1.75} className="text-jungle-green-600" />
-                <p className="text-sm font-medium text-jungle-green-700">¡WhatsApp vinculado correctamente!</p>
+              <div className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-green-100 bg-green-50 p-3 text-center">
+                <CheckCircle size={16} strokeWidth={1.75} className="text-green-600" />
+                <p className="text-sm font-medium text-green-700">¡WhatsApp vinculado correctamente!</p>
               </div>
             )}
           </ChannelCard>

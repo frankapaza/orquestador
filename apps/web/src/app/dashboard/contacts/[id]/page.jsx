@@ -85,7 +85,7 @@ function SendModal({ contact, onClose, onSent }) {
   const accountOpts = accounts.map(a => ({
     value: a.id,
     label: `${a.name} · ${a.phone_number ?? a.instance_name ?? '—'}`,
-    icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', channel === 'sms' ? 'bg-blue-500' : 'bg-jungle-green-500')} />,
+    icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', channel === 'sms' ? 'bg-violet-500' : 'bg-green-500')} />,
   }))
   const templateOpts = [{ value: '', label: 'Sin plantilla' }, ...templates.map(t => ({ value: t.id, label: t.name }))]
 
@@ -176,7 +176,7 @@ function SendModal({ contact, onClose, onSent }) {
               <button key={c.key} type="button" onClick={() => setChannel(c.key)}
                 className={cn('flex flex-1 items-center justify-center gap-1.5 rounded-xl border-2 py-2.5 text-sm font-medium transition-colors',
                   channel === c.key
-                    ? c.key === 'sms' ? 'border-blue-500 bg-blue-50 text-blue-700' : c.key === 'email' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-jungle-green-500 bg-jungle-green-50 text-jungle-green-700'
+                    ? c.key === 'sms' ? 'border-violet-500 bg-violet-50 text-violet-700' : c.key === 'email' ? 'border-amber-500 bg-amber-50 text-amber-700' : 'border-green-500 bg-green-50 text-green-700'
                     : 'border-border text-muted-foreground hover:bg-muted/60')}>
                 <c.Icon size={16} strokeWidth={1.75} />{c.label}
               </button>
@@ -593,8 +593,8 @@ function MetricGroup({ title, icon: Icon, metrics }) {
 const CHANNEL_ICON  = { whatsapp: <MessageCircle size={14} />, sms: <Smartphone size={14} />, email: <Mail size={14} /> }
 const CHANNEL_NAME  = { whatsapp: 'WhatsApp', sms: 'SMS', email: 'Email' }
 const CHANNEL_COLOR = {
-  whatsapp: 'bg-jungle-green-100 text-jungle-green-700 border-jungle-green-200',
-  sms:      'bg-blue-100 text-blue-700 border-blue-200',
+  whatsapp: 'bg-green-100 text-green-700 border-green-200',
+  sms:      'bg-violet-100 text-violet-700 border-violet-200',
   email:    'bg-amber-100 text-amber-700 border-amber-200',
 }
 const STATUS_LABEL = {

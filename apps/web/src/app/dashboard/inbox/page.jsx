@@ -14,10 +14,10 @@ import { cn } from '@/lib/utils'
 
 // ── Utilidades ───────────────────────────────────────────────────────────────
 const CHANNEL_LABEL = { whatsapp: 'WhatsApp', sms: 'SMS' }
-const CHANNEL_DOT   = { whatsapp: 'bg-jungle-green-500', sms: 'bg-blue-500' }
+const CHANNEL_DOT   = { whatsapp: 'bg-green-500', sms: 'bg-violet-500' }
 const CHANNEL_TINT  = {
-  whatsapp: 'bg-jungle-green-100 text-jungle-green-700',
-  sms:      'bg-blue-100 text-blue-700',
+  whatsapp: 'bg-green-100 text-green-700',
+  sms:      'bg-violet-100 text-violet-700',
 }
 
 function initials(name, phone) {
@@ -89,7 +89,7 @@ function timeLabel(dateStr) {
 
 function Avatar({ name, phone, channel, size = 'md' }) {
   const sz  = size === 'sm' ? 'w-9 h-9 text-xs' : size === 'lg' ? 'w-16 h-16 text-2xl' : 'w-11 h-11 text-sm'
-  const clr = channel === 'sms' ? 'bg-blue-100 text-blue-700' : 'bg-jungle-green-100 text-jungle-green-700'
+  const clr = channel === 'sms' ? 'bg-violet-100 text-violet-700' : 'bg-green-100 text-green-700'
   return (
     <div className={`${sz} ${clr} rounded-full flex items-center justify-center font-bold shrink-0`}>
       {initials(name, phone)}
@@ -156,7 +156,7 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone }) {
   const accountOpts = accounts.map(a => ({
     value: a.id,
     label: `${a.name} · ${a.phone_number ?? a.instance_name ?? '—'}`,
-    icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', channel === 'sms' ? 'bg-blue-500' : 'bg-jungle-green-500')} />,
+    icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', channel === 'sms' ? 'bg-violet-500' : 'bg-green-500')} />,
   }))
 
   const manualDigits = manualNumber.replace(/\D/g, '')
@@ -198,7 +198,7 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone }) {
                 <button key={ch} type="button" onClick={() => { setChannel(ch); setError(null) }}
                   className={cn('flex flex-1 items-center justify-center gap-2 rounded-xl border-2 py-2.5 text-sm font-medium transition-colors',
                     channel === ch
-                      ? ch === 'whatsapp' ? 'border-jungle-green-500 bg-jungle-green-50 text-jungle-green-700' : 'border-blue-500 bg-blue-50 text-blue-700'
+                      ? ch === 'whatsapp' ? 'border-green-500 bg-green-50 text-green-700' : 'border-violet-500 bg-violet-50 text-violet-700'
                       : 'border-border text-muted-foreground hover:bg-muted/60')}>
                   <Icon size={15} strokeWidth={1.75} />{lbl}
                 </button>
@@ -851,7 +851,7 @@ export default function InboxPage() {
               ...accounts.map(a => ({
                 value: a.id,
                 label: `${a.name} · ${a.phone_number ?? a.instance_name ?? '—'}`,
-                icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', a.channel === 'sms' ? 'bg-blue-500' : 'bg-jungle-green-500')} />,
+                icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', a.channel === 'sms' ? 'bg-violet-500' : 'bg-green-500')} />,
               })),
             ]}
           />
@@ -917,7 +917,7 @@ export default function InboxPage() {
                     {unread && <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-jungle-green-600 px-1 text-[11px] font-semibold text-white">{conv.unread_count}</span>}
                   </div>
                   <div className="mt-1.5 flex items-center gap-1.5">
-                    <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', conv.channel === 'sms' ? 'bg-blue-500' : 'bg-jungle-green-500')} />
+                    <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', conv.channel === 'sms' ? 'bg-violet-500' : 'bg-green-500')} />
                     <span className="truncate text-[11px] text-muted-foreground">{conv.account_name ?? CHANNEL_LABEL[conv.channel]}</span>
                     {conv.status === 'closed' && <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Cerrada</span>}
                   </div>

@@ -24,12 +24,12 @@ const STRATEGIES = [
 const CHANNELS = [
   { key: 'email',    label: 'Email',    desc: 'HTML, plantillas y seguimiento de aperturas', Icon: Mail,          tint: 'amber' },
   { key: 'whatsapp', label: 'WhatsApp', desc: 'Mensaje rotando tus números conectados',       Icon: MessageCircle, tint: 'green' },
-  { key: 'sms',      label: 'SMS',      desc: 'Texto vía tus gateways SMS',                    Icon: Smartphone,    tint: 'blue'  },
+  { key: 'sms',      label: 'SMS',      desc: 'Texto vía tus gateways SMS',                    Icon: Smartphone,    tint: 'violet' },
 ]
 const CHANNEL_TINT = {
-  amber: { sel: 'border-amber-500 bg-amber-50', icon: 'bg-amber-100 text-amber-700' },
-  green: { sel: 'border-jungle-green-500 bg-jungle-green-50', icon: 'bg-jungle-green-100 text-jungle-green-700' },
-  blue:  { sel: 'border-blue-500 bg-blue-50', icon: 'bg-blue-100 text-blue-700' },
+  amber:  { sel: 'border-amber-500 bg-amber-50', icon: 'bg-amber-100 text-amber-700' },
+  green:  { sel: 'border-green-500 bg-green-50', icon: 'bg-green-100 text-green-700' },
+  violet: { sel: 'border-violet-500 bg-violet-50', icon: 'bg-violet-100 text-violet-700' },
 }
 
 const fieldClass = 'h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0'

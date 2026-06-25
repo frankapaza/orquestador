@@ -257,10 +257,10 @@ export default function DashboardPage() {
         <SectionCard title="Actividad de mensajes" description="Últimos 7 días" className="lg:col-span-2">
           <div className="mb-4 flex items-center gap-4">
             <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <span className="h-2.5 w-2.5 rounded-full bg-jungle-green-600" /> WhatsApp
+              <span className="h-2.5 w-2.5 rounded-full bg-green-600" /> WhatsApp
             </span>
             <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <span className="h-2.5 w-2.5 rounded-full bg-jungle-green-300" /> SMS
+              <span className="h-2.5 w-2.5 rounded-full bg-violet-500" /> SMS
             </span>
           </div>
           {chartData.length === 0 ? (
@@ -271,20 +271,20 @@ export default function DashboardPage() {
                 <AreaChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
                   <defs>
                     <linearGradient id="area-wa" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#2c6c8c" stopOpacity={0.28} />
-                      <stop offset="100%" stopColor="#2c6c8c" stopOpacity={0} />
+                      <stop offset="0%" stopColor="#16a34a" stopOpacity={0.28} />
+                      <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="area-sms" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#86c5da" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="#86c5da" stopOpacity={0} />
+                      <stop offset="0%" stopColor="#7c3aed" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#7c3aed" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
                   <XAxis dataKey="day" tickLine={false} axisLine={false} height={42} interval={0} tick={<DateTick data={chartData} />} />
                   <YAxis tickLine={false} axisLine={false} width={36} allowDecimals={false} tick={{ fontSize: 12, fill: '#71717a' }} />
                   <Tooltip content={<ChartTooltip />} cursor={{ stroke: '#86c5da', strokeWidth: 1 }} />
-                  <Area type="monotone" dataKey="whatsapp" name="WhatsApp" stroke="#2c6c8c" strokeWidth={2} fill="url(#area-wa)" />
-                  <Area type="monotone" dataKey="sms" name="SMS" stroke="#86c5da" strokeWidth={2} fill="url(#area-sms)" />
+                  <Area type="monotone" dataKey="whatsapp" name="WhatsApp" stroke="#16a34a" strokeWidth={2} fill="url(#area-wa)" />
+                  <Area type="monotone" dataKey="sms" name="SMS" stroke="#7c3aed" strokeWidth={2} fill="url(#area-sms)" />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -309,7 +309,7 @@ export default function DashboardPage() {
                   href="/dashboard/inbox"
                   className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-muted/60"
                 >
-                  <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold', c.channel === 'whatsapp' ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-blue-100 text-blue-700')}>
+                  <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold', c.channel === 'whatsapp' ? 'bg-green-100 text-green-700' : 'bg-violet-100 text-violet-700')}>
                     {(c.contact_name ?? c.contact_phone)?.[0]?.toUpperCase() ?? '?'}
                   </div>
                   <div className="min-w-0 flex-1">
