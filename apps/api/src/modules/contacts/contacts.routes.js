@@ -13,7 +13,8 @@ function emailSnippet(html) {
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/\s+/g, ' ').trim()
-  return txt.length > 600 ? txt.slice(0, 600) + '…' : txt
+  // Cap generoso: suficiente para "Ver más" sin mandar correos gigantes al timeline.
+  return txt.length > 4000 ? txt.slice(0, 4000) + '…' : txt
 }
 
 const listSchema = z.object({

@@ -624,7 +624,9 @@ function describeEvent(event, contactName) {
     case 'email_received':
       return {
         icon: <ArrowDownLeft size={13} />, color: 'text-jungle-green-600', label: 'Respuesta de correo',
-        who: `De ${event.from_name || event.email || contactName}`,
+        who: event.from_name && event.email
+          ? `De ${event.from_name} · ${event.email}`
+          : `De ${event.from_name || event.email || contactName}`,
         sender: event.to_email ? { dir: 'Recibido en', name: null, email: event.to_email } : null,
         subject: event.subject || null,
         origin: 'Respuesta del cliente',
@@ -659,6 +661,8 @@ function TimelineItem({ event, last, contactName }) {
   const meta = describeEvent(event, contactName)
   const chColor = CHANNEL_COLOR[event.channel] ?? 'bg-muted text-muted-foreground border-border'
   const st = STATUS_LABEL[event.status]
+  const [verMas, setVerMas] = useState(false)
+  const esLargo = (event.body?.length ?? 0) > 180   // umbral aprox. de 3 líneas
 
   return (
     <div className="group flex gap-4">
@@ -716,11 +720,20 @@ function TimelineItem({ event, last, contactName }) {
           </p>
         )}
 
-        {/* Cuerpo del mensaje */}
+        {/* Cuerpo del mensaje — con Ver más / Ver menos para textos largos */}
         {event.body && (
-          <p className="mt-1.5 line-clamp-3 whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground">
-            {event.body}
-          </p>
+          <div className="mt-1.5">
+            <p className={cn('whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground',
+              !verMas && 'line-clamp-3')}>
+              {event.body}
+            </p>
+            {esLargo && (
+              <button type="button" onClick={() => setVerMas(v => !v)}
+                className="mt-1 text-xs font-medium text-jungle-green-600 hover:underline">
+                {verMas ? 'Ver menos' : 'Ver más'}
+              </button>
+            )}
+          </div>
         )}
 
         {/* Estado + origen */}
