@@ -23,6 +23,66 @@ const accountSchema = z.object({
 export async function domainsRoutes(fastify) {
   const auth = { onRequest: [fastify.authenticate] }
 
+  // --- Envío transaccional desde una cuenta SMTP específica ---
+  // Usado por sistemas externos (MCOB) para enviar un correo "desde" la cuenta
+  // que el usuario tiene autorizada, sin necesidad de que el destino sea un
+  // contacto registrado. La cuenta se valida contra el cliente del token.
+  const sendEmailSchema = z.object({
+    account_id:   z.string().uuid(),
+    to:           z.string().email(),
+    subject:      z.string().min(1),
+    html_content: z.string().min(1),
+    text_content: z.string().optional(),
+    from_name:    z.string().optional(),
+    reply_to:     z.string().email().optional(),
+    cc:           z.array(z.string().email()).optional(),
+    bcc:          z.array(z.string().email()).optional(),
+  })
+
+  fastify.post('/email/send', auth, async (req, reply) => {
+    const body = sendEmailSchema.parse(req.body)
+
+    // La cuenta debe pertenecer a un dominio del cliente del token y estar activa.
+    const [account] = await sql`
+      SELECT ea.*
+      FROM email_accounts ea
+      JOIN domains d ON d.id = ea.domain_id
+      WHERE ea.id = ${body.account_id}
+        AND d.client_id = ${req.user.sub}
+        AND ea.is_active = true
+    `
+    if (!account) return reply.code(404).send({ error: 'Cuenta de correo no encontrada o inactiva' })
+    if (account.daily_limit != null && account.sent_today >= account.daily_limit)
+      return reply.code(429).send({ error: 'Cuenta sin cupo diario disponible' })
+
+    const transporter = nodemailer.createTransport({
+      host:   account.smtp_host,
+      port:   account.smtp_port,
+      secure: account.smtp_port === 465,
+      auth:   { user: account.smtp_user, pass: account.smtp_pass },
+      tls:    { rejectUnauthorized: false },
+    })
+
+    let info
+    try {
+      info = await transporter.sendMail({
+        from:    `"${body.from_name || account.email}" <${account.email}>`,
+        to:      body.to,
+        replyTo: body.reply_to ?? account.email,
+        cc:      body.cc?.join(', ')  ?? undefined,
+        bcc:     body.bcc?.join(', ') ?? undefined,
+        subject: body.subject,
+        html:    body.html_content,
+        text:    body.text_content ?? undefined,
+      })
+    } catch (e) {
+      return reply.code(502).send({ error: 'Fallo el envío SMTP: ' + (e?.message || 'desconocido') })
+    }
+
+    await sql`UPDATE email_accounts SET sent_today = sent_today + 1, last_used_at = now() WHERE id = ${account.id}`
+    return { ok: true, message_id: info.messageId, to: body.to, from: account.email }
+  })
+
   // --- Dominios ---
 
   fastify.get('/domains', auth, async (req) => {
