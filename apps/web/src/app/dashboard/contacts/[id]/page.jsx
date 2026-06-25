@@ -40,7 +40,7 @@ function displayLabel(item) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Modal enviar mensaje
 // ─────────────────────────────────────────────────────────────────────────────
-function SendModal({ contact, onClose }) {
+function SendModal({ contact, onClose, onSent }) {
   const phones = contact.phones ?? []
   const emails = contact.emails ?? []
   const hasPhone = phones.length > 0
@@ -128,6 +128,7 @@ function SendModal({ contact, onClose }) {
         await api.post('/messages/send', { channel, account_id: accountId, to: toNumber, message: form.message })
       }
       setSent(true)
+      onSent?.()   // refresca el timeline del 360 con el envío recién hecho
     } catch (err) {
       setError(err.response?.data?.error ?? err.message)
     } finally { setSending(false) }
@@ -933,7 +934,7 @@ export default function Contact360Page() {
         </div>
       </div>
 
-      {showSend && <SendModal contact={contact} onClose={() => setShowSend(false)} />}
+      {showSend && <SendModal contact={contact} onClose={() => setShowSend(false)} onSent={load} />}
     </div>
   )
 }
