@@ -5,6 +5,17 @@ import { pickEmailAccount } from '../sending/smtp.sender.js'
 import { splitPhone, fullPhone } from '../../lib/phone.js'
 import nodemailer from 'nodemailer'
 
+// Convierte el HTML de un correo a texto plano corto para mostrar en el timeline.
+function emailSnippet(html) {
+  const txt = String(html || '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ').trim()
+  return txt.length > 600 ? txt.slice(0, 600) + '…' : txt
+}
+
 const listSchema = z.object({
   name: z.string().min(2),
   description: z.string().optional(),
@@ -309,9 +320,9 @@ export async function contactsRoutes(fastify) {
     // Registra el envío individual para que aparezca en la vista 360° del contacto.
     await sql`
       INSERT INTO transactional_emails
-        (client_id, contact_id, email_account_id, from_email, recipient_email, subject, body, status, message_id, sent_at)
+        (client_id, contact_id, email_account_id, from_email, from_name, recipient_email, subject, body, status, message_id, sent_at)
       VALUES
-        (${req.user.sub}, ${req.params.id}, ${account.id}, ${account.email}, ${recipient},
+        (${req.user.sub}, ${req.params.id}, ${account.id}, ${account.email}, ${body.from_name}, ${recipient},
          ${interpolate(body.subject)}, ${interpolate(body.html_content)}, 'sent', ${info.messageId}, now())
     `
 
@@ -417,17 +428,19 @@ export async function contactsRoutes(fastify) {
     ` : []
 
     // Correos individuales (transaccionales) — por contacto o por cualquiera de sus correos.
-    const txEmailEvents = await sql`
+    const txEmailEvents = (await sql`
       SELECT
         'email' AS channel,
         'outbound' AS direction,
         'email_sent' AS event_type,
         te.sent_at AS created_at,
         'Correo individual' AS reference,
-        te.subject AS body,
+        te.body,
+        te.subject,
         te.status,
         te.recipient_email AS email,
-        te.from_email
+        te.from_email,
+        te.from_name
       FROM transactional_emails te
       WHERE te.client_id = ${clientId}
         AND te.sent_at IS NOT NULL
@@ -437,7 +450,7 @@ export async function contactsRoutes(fastify) {
         )
       ORDER BY te.sent_at DESC
       LIMIT 50
-    `
+    `).map(e => ({ ...e, body: emailSnippet(e.body) }))
 
     // Respuestas entrantes de correo (IMAP) — por contacto o por su correo remitente.
     const inboundEmailEvents = await sql`
@@ -450,6 +463,8 @@ export async function contactsRoutes(fastify) {
         COALESCE(NULLIF(ei.body_text, ''), ei.subject) AS body,
         'received' AS status,
         ei.from_email AS email,
+        ei.from_name,
+        ei.to_email,
         ei.subject
       FROM email_inbound ei
       WHERE ei.client_id = ${clientId}

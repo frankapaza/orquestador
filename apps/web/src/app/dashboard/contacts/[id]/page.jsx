@@ -615,17 +615,19 @@ function describeEvent(event, contactName) {
       return {
         icon: <ArrowUpRight size={13} />, color: 'text-amber-600', label: 'Email enviado',
         who: `Para ${event.email ?? contactName}`,
-        origin: event.from_email
-          ? `Desde ${event.from_email}`
-          : (event.reference === 'Correo individual'
-              ? 'Correo individual'
-              : (event.reference ? `Campaña «${event.reference}»` : null)),
+        sender: event.from_email ? { dir: 'Enviado desde', name: event.from_name, email: event.from_email } : null,
+        subject: event.subject || null,
+        origin: (event.reference && event.reference !== 'Correo individual')
+          ? `Campaña «${event.reference}»`
+          : 'Mensaje directo',
       }
     case 'email_received':
       return {
         icon: <ArrowDownLeft size={13} />, color: 'text-jungle-green-600', label: 'Respuesta de correo',
-        who: `De ${event.email ?? contactName}`,
-        origin: event.subject ? `Asunto: ${event.subject}` : 'Respuesta del cliente',
+        who: `De ${event.from_name || event.email || contactName}`,
+        sender: event.to_email ? { dir: 'Recibido en', name: null, email: event.to_email } : null,
+        subject: event.subject || null,
+        origin: 'Respuesta del cliente',
       }
     case 'open':
       return { icon: <Eye size={13} />, color: 'text-violet-600', label: 'Abrió el email',
@@ -687,7 +689,7 @@ function TimelineItem({ event, last, contactName }) {
           </p>
         )}
 
-        {/* Cuenta/número nuestro con el que se envió o recibió */}
+        {/* Cuenta/número nuestro con el que se envió o recibió (WhatsApp/SMS) */}
         {meta.account && (
           <p className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
             <PhoneCall size={12} className="text-jungle-green-600" />
@@ -697,9 +699,26 @@ function TimelineItem({ event, last, contactName }) {
           </p>
         )}
 
-        {/* Cuerpo del mensaje / asunto */}
+        {/* Cuenta de correo emisora/receptora (Email) */}
+        {meta.sender && (
+          <p className="mt-1 inline-flex flex-wrap items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
+            <AtSign size={12} className="text-amber-600" />
+            <span className="font-medium text-foreground">{meta.sender.dir}:</span>
+            {meta.sender.name && <span>{meta.sender.name}</span>}
+            <span className="font-mono">{meta.sender.email}</span>
+          </p>
+        )}
+
+        {/* Asunto (Email) — separado del cuerpo del mensaje */}
+        {meta.subject && (
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Asunto:</span> {meta.subject}
+          </p>
+        )}
+
+        {/* Cuerpo del mensaje */}
         {event.body && (
-          <p className="mt-1.5 line-clamp-3 rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground">
+          <p className="mt-1.5 line-clamp-3 whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground">
             {event.body}
           </p>
         )}

@@ -111,9 +111,9 @@ export async function domainsRoutes(fastify) {
     `
     await sql`
       INSERT INTO transactional_emails
-        (client_id, contact_id, email_account_id, from_email, recipient_email, subject, body, status, message_id, sent_at)
+        (client_id, contact_id, email_account_id, from_email, from_name, recipient_email, subject, body, status, message_id, sent_at)
       VALUES
-        (${req.user.sub}, ${ct?.contact_id ?? null}, ${account.id}, ${account.email}, ${body.to},
+        (${req.user.sub}, ${ct?.contact_id ?? null}, ${account.id}, ${account.email}, ${body.from_name ?? null}, ${body.to},
          ${body.subject}, ${body.html_content}, 'sent', ${info.messageId}, now())
     `
 
