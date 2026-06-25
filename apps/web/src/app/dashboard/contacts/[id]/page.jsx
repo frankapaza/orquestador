@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
@@ -607,6 +607,12 @@ const STATUS_LABEL = {
   pending:   { text: 'En cola',   cls: 'bg-muted text-muted-foreground' },
 }
 
+// Quita los prefijos de respuesta/reenvío ("Re:", "RE:", "Rv:", "Fwd:"...) del asunto,
+// que el cliente de correo del destinatario agrega automáticamente al responder.
+function limpiarAsunto(s) {
+  return String(s || '').replace(/^((re|rv|fwd|fw)\s*:\s*)+/i, '').trim()
+}
+
 // Devuelve {icon,label,color, who, origin} explicando el evento de forma clara.
 function describeEvent(event, contactName) {
   const chName = CHANNEL_NAME[event.channel] ?? 'Mensaje'
@@ -628,7 +634,7 @@ function describeEvent(event, contactName) {
           ? `De ${event.from_name} · ${event.email}`
           : `De ${event.from_name || event.email || contactName}`,
         sender: event.to_email ? { dir: 'Recibido en', name: null, email: event.to_email } : null,
-        subject: event.subject || null,
+        subject: limpiarAsunto(event.subject) || null,
         origin: 'Respuesta del cliente',
       }
     case 'open':
@@ -661,8 +667,15 @@ function TimelineItem({ event, last, contactName }) {
   const meta = describeEvent(event, contactName)
   const chColor = CHANNEL_COLOR[event.channel] ?? 'bg-muted text-muted-foreground border-border'
   const st = STATUS_LABEL[event.status]
+  const bodyRef = useRef(null)
   const [verMas, setVerMas] = useState(false)
-  const esLargo = (event.body?.length ?? 0) > 180   // umbral aprox. de 3 líneas
+  const [truncado, setTruncado] = useState(false)
+  // Detecta si el texto realmente se corta (más robusto que contar caracteres:
+  // sirve para email, donde el cuerpo puede cortarse por líneas y no por longitud).
+  useEffect(() => {
+    const el = bodyRef.current
+    if (el && !verMas) setTruncado(el.scrollHeight > el.clientHeight + 4)
+  }, [event.body, verMas])
 
   return (
     <div className="group flex gap-4">
@@ -723,11 +736,11 @@ function TimelineItem({ event, last, contactName }) {
         {/* Cuerpo del mensaje — con Ver más / Ver menos para textos largos */}
         {event.body && (
           <div className="mt-1.5">
-            <p className={cn('whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground',
+            <p ref={bodyRef} className={cn('whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground',
               !verMas && 'line-clamp-3')}>
               {event.body}
             </p>
-            {esLargo && (
+            {truncado && (
               <button type="button" onClick={() => setVerMas(v => !v)}
                 className="mt-1 text-xs font-medium text-jungle-green-600 hover:underline">
                 {verMas ? 'Ver menos' : 'Ver más'}
