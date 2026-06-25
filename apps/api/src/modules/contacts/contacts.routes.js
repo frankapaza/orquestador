@@ -244,6 +244,7 @@ export async function contactsRoutes(fastify) {
       html_content: z.string().min(1),
       text_content: z.string().optional(),
       to:           z.string().email().optional(),   // correo destino específico (uno de los del contacto)
+      account_id:   z.string().uuid().optional(),     // cuenta emisora elegida; si no, se auto-selecciona
       reply_to:     z.string().email().optional(),
       cc:           z.array(z.string().email()).optional(),
       bcc:          z.array(z.string().email()).optional(),
@@ -264,7 +265,18 @@ export async function contactsRoutes(fastify) {
     }
     if (!recipient) return reply.code(400).send({ error: 'Este contacto no tiene email registrado' })
 
-    const account = await pickEmailAccount(req.user.sub)
+    // Cuenta emisora: la elegida (validada contra el cliente) o, si no, auto-selección.
+    let account = null
+    if (body.account_id) {
+      const [acc] = await sql`
+        SELECT ea.*
+        FROM email_accounts ea
+        JOIN domains d ON d.id = ea.domain_id
+        WHERE ea.id = ${body.account_id} AND d.client_id = ${req.user.sub} AND ea.is_active = true
+      `
+      account = acc ?? null
+    }
+    if (!account) account = await pickEmailAccount(req.user.sub)
     if (!account) return reply.code(400).send({ error: 'No hay cuentas SMTP activas con cuota disponible' })
 
     const transporter = nodemailer.createTransport({
@@ -293,6 +305,15 @@ export async function contactsRoutes(fastify) {
     })
 
     await sql`UPDATE email_accounts SET sent_today = sent_today + 1, last_used_at = now() WHERE id = ${account.id}`
+
+    // Registra el envío individual para que aparezca en la vista 360° del contacto.
+    await sql`
+      INSERT INTO transactional_emails
+        (client_id, contact_id, email_account_id, from_email, recipient_email, subject, body, status, message_id, sent_at)
+      VALUES
+        (${req.user.sub}, ${req.params.id}, ${account.id}, ${account.email}, ${recipient},
+         ${interpolate(body.subject)}, ${interpolate(body.html_content)}, 'sent', ${info.messageId}, now())
+    `
 
     return { ok: true, message_id: info.messageId, to: recipient }
   })
@@ -332,7 +353,7 @@ export async function contactsRoutes(fastify) {
     const emailAddrs = [...new Set(emails.map(e => e.email).filter(Boolean))]
     const hasEmails  = emailAddrs.length > 0
 
-    // Estadísticas email
+    // Estadísticas email (campañas + correos individuales)
     const [emailStats] = await sql`
       SELECT
         COUNT(*)                                       AS total_sent,
@@ -340,6 +361,18 @@ export async function contactsRoutes(fastify) {
         COUNT(*) FILTER (WHERE status = 'failed')      AS failed
       FROM campaign_jobs
       WHERE contact_id = ${req.params.id}
+    `
+    const [txEmailStats] = await sql`
+      SELECT
+        COUNT(*)                                       AS total_sent,
+        COUNT(*) FILTER (WHERE status = 'sent')        AS delivered,
+        COUNT(*) FILTER (WHERE status = 'failed')      AS failed
+      FROM transactional_emails
+      WHERE client_id = ${clientId}
+        AND (
+          contact_id = ${req.params.id}
+          ${hasEmails ? sql`OR recipient_email IN ${sql(emailAddrs)}` : sql``}
+        )
     `
 
     // Aperturas y clicks del contacto (de cualquiera de sus correos)
@@ -382,6 +415,51 @@ export async function contactsRoutes(fastify) {
       WHERE cj.contact_id = ${req.params.id}
         AND cj.sent_at IS NOT NULL
     ` : []
+
+    // Correos individuales (transaccionales) — por contacto o por cualquiera de sus correos.
+    const txEmailEvents = await sql`
+      SELECT
+        'email' AS channel,
+        'outbound' AS direction,
+        'email_sent' AS event_type,
+        te.sent_at AS created_at,
+        'Correo individual' AS reference,
+        te.subject AS body,
+        te.status,
+        te.recipient_email AS email,
+        te.from_email
+      FROM transactional_emails te
+      WHERE te.client_id = ${clientId}
+        AND te.sent_at IS NOT NULL
+        AND (
+          te.contact_id = ${req.params.id}
+          ${hasEmails ? sql`OR te.recipient_email IN ${sql(emailAddrs)}` : sql``}
+        )
+      ORDER BY te.sent_at DESC
+      LIMIT 50
+    `
+
+    // Respuestas entrantes de correo (IMAP) — por contacto o por su correo remitente.
+    const inboundEmailEvents = await sql`
+      SELECT
+        'email' AS channel,
+        'inbound' AS direction,
+        'email_received' AS event_type,
+        ei.received_at AS created_at,
+        'Respuesta de correo' AS reference,
+        COALESCE(NULLIF(ei.body_text, ''), ei.subject) AS body,
+        'received' AS status,
+        ei.from_email AS email,
+        ei.subject
+      FROM email_inbound ei
+      WHERE ei.client_id = ${clientId}
+        AND (
+          ei.contact_id = ${req.params.id}
+          ${hasEmails ? sql`OR ei.from_email IN ${sql(emailAddrs)}` : sql``}
+        )
+      ORDER BY ei.received_at DESC
+      LIMIT 50
+    `
 
     const trackEvents = hasEmails ? await sql`
       SELECT
@@ -436,13 +514,18 @@ export async function contactsRoutes(fastify) {
     ` : []
 
     // Unir y ordenar cronológicamente
-    const timeline = [...emailEvents, ...trackEvents, ...msgEvents]
+    const timeline = [...emailEvents, ...txEmailEvents, ...inboundEmailEvents, ...trackEvents, ...msgEvents]
       .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
 
     return {
       contact,
       stats: {
-        email:    { ...emailStats, ...trackStats },
+        email: {
+          total_sent: Number(emailStats.total_sent) + Number(txEmailStats.total_sent),
+          delivered:  Number(emailStats.delivered)  + Number(txEmailStats.delivered),
+          failed:     Number(emailStats.failed)     + Number(txEmailStats.failed),
+          ...trackStats,
+        },
         messages: msgStats,
       },
       timeline,

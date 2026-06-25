@@ -24,7 +24,7 @@ const PORT_PRESETS = [
   { label: '465 — SSL/TLS', port: 465, tls: true },
   { label: '25 — Sin cifrado', port: 25, tls: false },
 ]
-const EMPTY_ACCOUNT = { email: '', smtp_host: '', smtp_port: 587, smtp_user: '', smtp_pass: '', use_tls: true, daily_limit: 300 }
+const EMPTY_ACCOUNT = { email: '', smtp_host: '', smtp_port: 587, smtp_user: '', smtp_pass: '', use_tls: true, daily_limit: 300, imap_enabled: false, imap_pass: '' }
 
 function DnsBadge({ ok, label }) {
   return (
@@ -39,7 +39,7 @@ function DnsBadge({ ok, label }) {
 function AccountModal({ domainId, account, onClose, onSaved }) {
   const editing = !!account
   const [form, setForm] = useState(editing
-    ? { email: account.email, smtp_host: account.smtp_host, smtp_port: account.smtp_port, smtp_user: account.smtp_user ?? account.email, smtp_pass: '', use_tls: account.use_tls, daily_limit: account.daily_limit }
+    ? { email: account.email, smtp_host: account.smtp_host, smtp_port: account.smtp_port, smtp_user: account.smtp_user ?? account.email, smtp_pass: '', use_tls: account.use_tls, daily_limit: account.daily_limit, imap_enabled: account.imap_enabled ?? false, imap_pass: '' }
     : { ...EMPTY_ACCOUNT })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -53,6 +53,7 @@ function AccountModal({ domainId, account, onClose, onSaved }) {
         await api.patch(`/domains/${domainId}/accounts/${account.id}`, {
           email: form.email, smtp_host: form.smtp_host, smtp_port: parseInt(form.smtp_port), smtp_user: form.smtp_user,
           use_tls: form.use_tls, daily_limit: parseInt(form.daily_limit), ...(form.smtp_pass ? { smtp_pass: form.smtp_pass } : {}),
+          imap_enabled: form.imap_enabled, ...(form.imap_pass ? { imap_pass: form.imap_pass } : {}),
         })
       } else {
         await api.post(`/domains/${domainId}/accounts`, { ...form, smtp_port: parseInt(form.smtp_port), daily_limit: parseInt(form.daily_limit) })
@@ -102,6 +103,21 @@ function AccountModal({ domainId, account, onClose, onSaved }) {
             <Checkbox checked={form.use_tls} onCheckedChange={v => set('use_tls', !!v)} />
             <span className="text-sm text-foreground">Usar TLS</span>
           </label>
+
+          {/* Recepción de respuestas (IMAP en tiempo real) */}
+          <div className="col-span-2 space-y-3 rounded-xl border bg-muted/30 p-4">
+            <label className="flex cursor-pointer items-center gap-2">
+              <Checkbox checked={form.imap_enabled} onCheckedChange={v => set('imap_enabled', !!v)} />
+              <span className="text-sm font-medium text-foreground">Recibir respuestas (IMAP, tiempo real)</span>
+            </label>
+            {form.imap_enabled && (
+              <div className="space-y-1.5">
+                <Label>Contraseña IMAP <span className="font-normal text-muted-foreground">(opcional — si difiere de la SMTP / app password)</span></Label>
+                <Input type="password" value={form.imap_pass} onChange={e => set('imap_pass', e.target.value)} placeholder="Vacío = usar la misma contraseña SMTP" className={inputClass} />
+                <p className="text-xs text-muted-foreground">El host IMAP se deriva del SMTP (ej. smtp.gmail.com → imap.gmail.com). En Gmail/Workspace requiere IMAP activado y un app password.</p>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex gap-3 pt-1">
           <Button type="submit" disabled={loading} className="flex-1">

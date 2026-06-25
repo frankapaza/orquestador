@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import nodemailer from 'nodemailer'
 import { sql } from '../../lib/db.js'
+import { imapManager } from '../email/imap.manager.js'
 
 const domainSchema = z.object({
   domain: z.string().min(4),
@@ -18,7 +19,25 @@ const accountSchema = z.object({
   smtp_pass:   z.string().min(1),
   use_tls:     z.boolean().default(true),
   daily_limit: z.number().int().min(1).max(2000).default(300),
+  // IMAP (recepción de respuestas en tiempo real). Opcionales: se derivan del SMTP.
+  imap_host:    z.string().optional(),
+  imap_port:    z.number().int().optional(),
+  imap_user:    z.string().optional(),
+  imap_pass:    z.string().optional(),
+  imap_tls:     z.boolean().optional(),
+  imap_enabled: z.boolean().optional(),
+  is_active:    z.boolean().optional(),
 })
+
+// Deriva el host IMAP a partir del SMTP cuando no se especifica.
+function deriveImapHost(smtpHost) {
+  if (!smtpHost) return null
+  const h = String(smtpHost).toLowerCase().trim()
+  if (h.includes('gmail'))                       return 'imap.gmail.com'
+  if (h.includes('office365') || h.includes('outlook')) return 'outlook.office365.com'
+  if (h.startsWith('smtp.'))                     return 'imap.' + h.slice(5)
+  return h
+}
 
 export async function domainsRoutes(fastify) {
   const auth = { onRequest: [fastify.authenticate] }
@@ -80,7 +99,37 @@ export async function domainsRoutes(fastify) {
     }
 
     await sql`UPDATE email_accounts SET sent_today = sent_today + 1, last_used_at = now() WHERE id = ${account.id}`
+
+    // Vincula el envío a un contacto si el destino coincide con uno registrado,
+    // y lo guarda para que aparezca en la vista 360° (sección Email).
+    const [ct] = await sql`
+      SELECT ce.contact_id
+      FROM contact_emails ce
+      JOIN contacts c ON c.id = ce.contact_id
+      WHERE lower(ce.email) = lower(${body.to}) AND c.client_id = ${req.user.sub}
+      LIMIT 1
+    `
+    await sql`
+      INSERT INTO transactional_emails
+        (client_id, contact_id, email_account_id, from_email, recipient_email, subject, body, status, message_id, sent_at)
+      VALUES
+        (${req.user.sub}, ${ct?.contact_id ?? null}, ${account.id}, ${account.email}, ${body.to},
+         ${body.subject}, ${body.html_content}, 'sent', ${info.messageId}, now())
+    `
+
     return { ok: true, message_id: info.messageId, to: body.to, from: account.email }
+  })
+
+  // Lista plana de cuentas SMTP activas del cliente (para selectores "Enviar desde").
+  fastify.get('/email/accounts', auth, async (req) => {
+    return sql`
+      SELECT ea.id, ea.email, ea.smtp_host, ea.daily_limit, ea.sent_today,
+             d.id AS domain_id, d.domain
+      FROM email_accounts ea
+      JOIN domains d ON d.id = ea.domain_id
+      WHERE d.client_id = ${req.user.sub} AND ea.is_active = true
+      ORDER BY d.domain, ea.email
+    `
   })
 
   // --- Dominios ---
@@ -142,7 +191,7 @@ export async function domainsRoutes(fastify) {
     return sql`
       SELECT ea.id, ea.domain_id, ea.email, ea.smtp_host, ea.smtp_port, ea.use_tls,
              ea.daily_limit, ea.sent_today, ea.last_used_at, ea.is_active, ea.created_at,
-             ea.assigned_member_id,
+             ea.assigned_member_id, ea.imap_host, ea.imap_port, ea.imap_enabled,
              cm.name  AS assigned_member_name,
              cm.email AS assigned_member_email
       FROM email_accounts ea
@@ -157,14 +206,25 @@ export async function domainsRoutes(fastify) {
     if (!domain) return reply.code(404).send({ error: 'Dominio no encontrado' })
 
     const body = accountSchema.parse(req.body)
+    // IMAP: si no se especifica, se deriva del SMTP (mismo buzón).
+    const imapHost = body.imap_host ?? deriveImapHost(body.smtp_host)
+    const imapUser = body.imap_user ?? body.smtp_user
+    const imapPass = body.imap_pass ?? body.smtp_pass
+    const imapPort = body.imap_port ?? 993
+    const imapTls  = body.imap_tls  ?? true
+    const imapEnabled = body.imap_enabled ?? false
     const [account] = await sql`
       INSERT INTO email_accounts
-        (domain_id, client_id, email, smtp_host, smtp_port, smtp_user, smtp_pass, use_tls, daily_limit)
+        (domain_id, client_id, email, smtp_host, smtp_port, smtp_user, smtp_pass, use_tls, daily_limit,
+         imap_host, imap_port, imap_user, imap_pass, imap_tls, imap_enabled)
       VALUES
         (${req.params.domainId}, ${req.user.sub}, ${body.email}, ${body.smtp_host},
-         ${body.smtp_port}, ${body.smtp_user}, ${body.smtp_pass}, ${body.use_tls}, ${body.daily_limit})
-      RETURNING id, domain_id, email, smtp_host, smtp_port, use_tls, daily_limit, is_active, created_at
+         ${body.smtp_port}, ${body.smtp_user}, ${body.smtp_pass}, ${body.use_tls}, ${body.daily_limit},
+         ${imapHost}, ${imapPort}, ${imapUser}, ${imapPass}, ${imapTls}, ${imapEnabled})
+      RETURNING id, domain_id, email, smtp_host, smtp_port, use_tls, daily_limit, is_active, created_at,
+                imap_host, imap_port, imap_enabled
     `
+    imapManager.reconcile(account.id).catch(() => {})   // activa IMAP IDLE si corresponde
     return reply.code(201).send(account)
   })
 
@@ -223,13 +283,21 @@ export async function domainsRoutes(fastify) {
         smtp_pass   = COALESCE(${body.smtp_pass   ?? null}, smtp_pass),
         use_tls     = COALESCE(${body.use_tls     ?? null}, use_tls),
         daily_limit = COALESCE(${body.daily_limit ?? null}, daily_limit),
-        is_active   = COALESCE(${body.is_active   ?? null}, is_active)
+        is_active   = COALESCE(${body.is_active   ?? null}, is_active),
+        imap_host    = COALESCE(${body.imap_host    ?? null}, imap_host),
+        imap_port    = COALESCE(${body.imap_port    ?? null}, imap_port),
+        imap_user    = COALESCE(${body.imap_user    ?? null}, imap_user),
+        imap_pass    = COALESCE(${body.imap_pass    ?? null}, imap_pass),
+        imap_tls     = COALESCE(${body.imap_tls     ?? null}, imap_tls),
+        imap_enabled = COALESCE(${body.imap_enabled ?? null}, imap_enabled)
       WHERE id = ${req.params.accountId}
         AND domain_id = ${req.params.domainId}
         AND client_id = ${req.user.sub}
-      RETURNING id, domain_id, email, smtp_host, smtp_port, smtp_user, use_tls, daily_limit, is_active, created_at
+      RETURNING id, domain_id, email, smtp_host, smtp_port, smtp_user, use_tls, daily_limit, is_active, created_at,
+                imap_host, imap_port, imap_enabled
     `
     if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
+    imapManager.reconcile(account.id).catch(() => {})   // reconecta/desconecta IMAP según estado
     return account
   })
 
@@ -242,6 +310,7 @@ export async function domainsRoutes(fastify) {
       RETURNING id
     `
     if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
+    imapManager.disconnect(req.params.accountId).catch(() => {})   // corta IMAP IDLE si estaba activo
     return { deleted: true }
   })
 }

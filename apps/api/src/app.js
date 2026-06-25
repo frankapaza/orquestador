@@ -30,6 +30,7 @@ import { docsRoutes }      from './modules/docs/docs.routes.js'
 import eventsRoutes        from './modules/events/events.routes.js'
 import { startCampaignWorker, enqueueCampaign } from './workers/campaign.queue.js'
 import { baileysManager } from './modules/whatsapp/baileys.manager.js'
+import { imapManager } from './modules/email/imap.manager.js'
 import { sql } from './lib/db.js'
 
 const fastify = Fastify({
@@ -95,6 +96,11 @@ if (WORKERS_DISABLED) {
   setTimeout(() => {
     baileysManager.initAll().catch(err => fastify.log.error({ err }, '[Baileys] Error al inicializar sesiones'))
   }, 3000)
+
+  // Iniciar conexiones IMAP IDLE (recepción de correo en tiempo real)
+  setTimeout(() => {
+    imapManager.initAll().catch(err => fastify.log.error({ err }, '[IMAP] Error al inicializar conexiones'))
+  }, 4000)
 
   // Verificar campanas programadas cada minuto
   cron.schedule('* * * * *', async () => {

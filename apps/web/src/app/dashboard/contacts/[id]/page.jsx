@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import api from '../../../../lib/api'
@@ -59,9 +60,11 @@ function SendModal({ contact, onClose }) {
   const [templates, setTemplates] = useState([])
   const [templateId, setTemplateId] = useState('')
   const [accountId, setAccountId] = useState('')
+  const [emailAccounts, setEmailAccounts] = useState([])
+  const [emailAccountId, setEmailAccountId] = useState('')
   const [toPhoneId, setToPhoneId] = useState(primaryPhone?.id)
   const [toEmail, setToEmail]     = useState(primaryEmail?.email)
-  const [form, setForm] = useState({ subject: '', from_name: '', html_content: '', message: '' })
+  const [form, setForm] = useState({ subject: '', from_name: '', html_content: '', message: '', cc: '', bcc: '' })
   const [sending, setSending] = useState(false)
   const [error, setError]     = useState(null)
   const [sent, setSent]       = useState(false)
@@ -70,6 +73,7 @@ function SendModal({ contact, onClose }) {
     api.get('/whatsapp/accounts').then(r => setWa(r.data.filter(a => a.is_connected))).catch(() => {})
     api.get('/sms/accounts').then(r => setSms(r.data.filter(a => a.is_online))).catch(() => {})
     api.get('/templates').then(r => setTemplates(r.data)).catch(() => {})
+    api.get('/email/accounts').then(r => setEmailAccounts(r.data)).catch(() => {})
   }, [])
 
   const accounts = channel === 'whatsapp' ? waAccounts : smsAccounts
@@ -85,6 +89,16 @@ function SendModal({ contact, onClose }) {
   }))
   const templateOpts = [{ value: '', label: 'Sin plantilla' }, ...templates.map(t => ({ value: t.id, label: t.name }))]
 
+  // Cuenta de correo emisora (cuando hay varios dominios/correos configurados).
+  useEffect(() => {
+    if (channel === 'email' && !emailAccountId && emailAccounts.length) setEmailAccountId(emailAccounts[0].id)
+  }, [channel, emailAccounts])
+  const emailAccountOpts = emailAccounts.map(a => ({
+    value: a.id,
+    label: `${a.email}${a.domain ? ' · ' + a.domain : ''}`,
+    icon: <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />,
+  }))
+
   const selectedPhone = phones.find(p => p.id === toPhoneId) ?? primaryPhone
   const toNumber = selectedPhone ? fullNumber(selectedPhone) : ''
 
@@ -99,8 +113,14 @@ function SendModal({ contact, onClose }) {
     setSending(true); setError(null)
     try {
       if (channel === 'email') {
+        const parseList = s => (s || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean)
+        const ccList = parseList(form.cc)
+        const bccList = parseList(form.bcc)
         await api.post(`/contacts/${contact.id}/send-email`, {
           subject: form.subject, from_name: form.from_name, html_content: form.html_content, to: toEmail,
+          account_id: emailAccountId || undefined,
+          cc:  ccList.length  ? ccList  : undefined,
+          bcc: bccList.length ? bccList : undefined,
         })
       } else {
         if (!accountId) throw new Error('Selecciona una cuenta')
@@ -116,7 +136,9 @@ function SendModal({ contact, onClose }) {
   const f = k => ({ value: form[k] ?? '', onChange: e => setForm(p => ({ ...p, [k]: e.target.value })) })
   const name = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || toNumber || toEmail
 
-  if (sent) return (
+  if (typeof document === 'undefined') return null
+
+  if (sent) return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-sm rounded-2xl border bg-card p-8 text-center shadow-xl">
         <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-jungle-green-100 text-jungle-green-600">
@@ -126,10 +148,11 @@ function SendModal({ contact, onClose }) {
         <p className="mt-1 text-sm text-muted-foreground">A {channel === 'email' ? toEmail : toNumber}</p>
         <Button onClick={onClose} className="mt-6 w-full">Cerrar</Button>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border bg-card shadow-xl">
         <div className="flex items-center justify-between border-b px-6 py-4">
@@ -215,6 +238,17 @@ function SendModal({ contact, onClose }) {
           {/* Campos por canal */}
           {channel === 'email' ? (
             <>
+              <div className="space-y-1.5">
+                <Label>Enviar desde</Label>
+                {emailAccounts.length === 0 ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-700">
+                    <AlertTriangle size={16} strokeWidth={1.75} /> Sin cuentas de correo configuradas; se usará la predeterminada.
+                  </div>
+                ) : (
+                  <SelectMenu value={emailAccountId} onChange={setEmailAccountId} options={emailAccountOpts}
+                    leadingIcon={<AtSign size={15} className="shrink-0 text-muted-foreground" />} placeholder="Elegir correo emisor" className="h-[52px]" />
+                )}
+              </div>
               {templates.length > 0 && (
                 <div className="space-y-1.5">
                   <Label>Cargar plantilla (opcional)</Label>
@@ -229,6 +263,18 @@ function SendModal({ contact, onClose }) {
                 <Label>Asunto</Label>
                 <Input {...f('subject')} required placeholder="Asunto del correo" className={inputCls} />
                 <p className="text-xs text-muted-foreground">Puedes usar <code className="rounded bg-muted px-1 py-0.5">{'{{first_name}}'}</code></p>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>CC (con copia) — opcional</Label>
+                  <Input {...f('cc')} placeholder="correo1@x.com, correo2@y.com" className={inputCls} />
+                  <p className="text-xs text-muted-foreground">Visibles; reciben también las respuestas.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>CCO (con copia oculta) — opcional</Label>
+                  <Input {...f('bcc')} placeholder="oculto1@x.com, oculto2@y.com" className={inputCls} />
+                  <p className="text-xs text-muted-foreground">Ocultos; no ven las respuestas.</p>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label>Contenido HTML</Label>
@@ -272,7 +318,8 @@ function SendModal({ contact, onClose }) {
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -567,7 +614,15 @@ function describeEvent(event, contactName) {
       return {
         icon: <ArrowUpRight size={13} />, color: 'text-amber-600', label: 'Email enviado',
         who: `Para ${event.email ?? contactName}`,
-        origin: event.reference ? `Campaña «${event.reference}»` : null,
+        origin: event.reference === 'Correo individual'
+          ? 'Correo individual'
+          : (event.reference ? `Campaña «${event.reference}»` : null),
+      }
+    case 'email_received':
+      return {
+        icon: <ArrowDownLeft size={13} />, color: 'text-jungle-green-600', label: 'Respuesta de correo',
+        who: `De ${event.email ?? contactName}`,
+        origin: event.subject ? `Asunto: ${event.subject}` : 'Respuesta del cliente',
       }
     case 'open':
       return { icon: <Eye size={13} />, color: 'text-violet-600', label: 'Abrió el email',
@@ -684,6 +739,26 @@ export default function Contact360Page() {
   }
 
   useEffect(() => { load() }, [id])
+
+  // Tiempo real: cuando llega una respuesta de correo de este contacto (IMAP IDLE → SSE),
+  // refresca el 360 para que la respuesta aparezca al instante en el timeline.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const token = localStorage.getItem('kubo_token')
+    if (!token) return
+    const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1').replace(/\/$/, '')
+    let es
+    try {
+      es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`)
+      es.addEventListener('email:inbound', e => {
+        try {
+          const ev = JSON.parse(e.data)
+          if (String(ev.contact_id) === String(id)) load()
+        } catch {}
+      })
+    } catch {}
+    return () => { try { es && es.close() } catch {} }
+  }, [id])
 
   if (loading) return (
     <div className="flex h-64 items-center justify-center">
