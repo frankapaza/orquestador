@@ -7,7 +7,7 @@ import api from '../../../../lib/api'
 import {
   Send, ArrowLeft, Mail, Smartphone, MessageCircle, AlertTriangle, XCircle,
   Eye, Link2, Loader2, CheckCircle, Plus, Star, Trash2, X, Inbox, Circle,
-  ArrowDownLeft, ArrowUpRight, Phone, PhoneCall, Copy, Check, AtSign, Calendar, Users,
+  ArrowDownLeft, ArrowUpRight, Phone, PhoneCall, Copy, Check, AtSign, Calendar, Users, ChevronDown,
 } from '../../../../components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -613,6 +613,26 @@ function limpiarAsunto(s) {
   return String(s || '').replace(/^((re|rv|fwd|fw)\s*:\s*)+/i, '').trim()
 }
 
+// Separa la respuesta NUEVA del mensaje citado (la conversación previa que el cliente
+// de correo agrega al responder). Devuelve { respuesta, citado }.
+function separarCita(texto) {
+  const t = String(texto || '').replace(/\r\n/g, '\n')
+  const lineas = t.split('\n')
+  // Línea de atribución típica: "El <fecha> a las <hora>, <nombre> (<correo>) escribió:",
+  // "On <date>, <name> wrote:", "-----Mensaje original-----", o líneas que empiezan con ">".
+  const reAttr = /^\s*(el\s.+escribi[oó]\s*:|on\s.+wrote\s*:|-{2,}\s*mensaje original|_{5,})/i
+  let corte = -1
+  for (let i = 0; i < lineas.length; i++) {
+    if (reAttr.test(lineas[i]) || /^\s*>/.test(lineas[i])) { corte = i; break }
+  }
+  if (corte === -1) return { respuesta: t.trim(), citado: '' }
+  const respuesta = lineas.slice(0, corte).join('\n').trim()
+  const citado    = lineas.slice(corte).join('\n').replace(/^\s*>\s?/gm, '').trim()
+  // Si no hubo texto nuevo antes de la cita, mostramos todo como respuesta (no ocultar nada).
+  if (!respuesta) return { respuesta: t.trim(), citado: '' }
+  return { respuesta, citado }
+}
+
 // Devuelve {icon,label,color, who, origin} explicando el evento de forma clara.
 function describeEvent(event, contactName) {
   const chName = CHANNEL_NAME[event.channel] ?? 'Mensaje'
@@ -621,7 +641,8 @@ function describeEvent(event, contactName) {
       return {
         icon: <ArrowUpRight size={13} />, color: 'text-amber-600', label: 'Email enviado',
         who: `Para ${event.email ?? contactName}`,
-        sender: event.from_email ? { dir: 'Enviado desde', name: event.from_name, email: event.from_email } : null,
+        remitente: event.from_name || null,
+        sender: event.from_email ? { dir: 'Enviado desde', name: null, email: event.from_email } : null,
         subject: event.subject || null,
         origin: (event.reference && event.reference !== 'Correo individual')
           ? `Campaña «${event.reference}»`
@@ -670,12 +691,17 @@ function TimelineItem({ event, last, contactName }) {
   const bodyRef = useRef(null)
   const [verMas, setVerMas] = useState(false)
   const [truncado, setTruncado] = useState(false)
+  const [verCita, setVerCita] = useState(false)
+  // En respuestas de correo, separa el texto NUEVO del mensaje citado (la conversación previa).
+  const { respuesta, citado } = event.event_type === 'email_received'
+    ? separarCita(event.body)
+    : { respuesta: event.body, citado: '' }
   // Detecta si el texto realmente se corta (más robusto que contar caracteres:
   // sirve para email, donde el cuerpo puede cortarse por líneas y no por longitud).
   useEffect(() => {
     const el = bodyRef.current
     if (el && !verMas) setTruncado(el.scrollHeight > el.clientHeight + 4)
-  }, [event.body, verMas])
+  }, [respuesta, verMas])
 
   return (
     <div className="group flex gap-4">
@@ -716,6 +742,13 @@ function TimelineItem({ event, last, contactName }) {
           </p>
         )}
 
+        {/* Remitente del correo (nombre con el que sale) — encima de "Enviado desde" */}
+        {meta.remitente && (
+          <p className="mt-1 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">Remitente:</span> {meta.remitente}
+          </p>
+        )}
+
         {/* Cuenta de correo emisora/receptora (Email) */}
         {meta.sender && (
           <p className="mt-1 inline-flex flex-wrap items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
@@ -733,18 +766,34 @@ function TimelineItem({ event, last, contactName }) {
           </p>
         )}
 
-        {/* Cuerpo del mensaje — con Ver más / Ver menos para textos largos */}
-        {event.body && (
+        {/* Cuerpo del mensaje (respuesta real) — con Ver más / Ver menos para textos largos */}
+        {respuesta && (
           <div className="mt-1.5">
             <p ref={bodyRef} className={cn('whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground',
               !verMas && 'line-clamp-3')}>
-              {event.body}
+              {respuesta}
             </p>
             {truncado && (
               <button type="button" onClick={() => setVerMas(v => !v)}
                 className="mt-1 text-xs font-medium text-jungle-green-600 hover:underline">
                 {verMas ? 'Ver menos' : 'Ver más'}
               </button>
+            )}
+          </div>
+        )}
+
+        {/* Mensaje citado (conversación previa) — claramente diferenciado y colapsable */}
+        {citado && (
+          <div className="mt-2">
+            <button type="button" onClick={() => setVerCita(v => !v)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <ChevronDown size={13} className={cn('transition-transform', verCita && 'rotate-180')} />
+              {verCita ? 'Ocultar mensaje citado' : 'Ver mensaje citado'}
+            </button>
+            {verCita && (
+              <div className="mt-1.5 whitespace-pre-line border-l-2 border-border bg-muted/30 px-3 py-2 text-xs italic text-muted-foreground">
+                {citado}
+              </div>
             )}
           </div>
         )}
