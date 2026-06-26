@@ -429,7 +429,7 @@ export async function contactsRoutes(fastify) {
     ` : []
 
     // Correos individuales (transaccionales) — por contacto o por cualquiera de sus correos.
-    const txEmailEvents = (await sql`
+    const txEmailEvents = await sql`
       SELECT
         'email' AS channel,
         'outbound' AS direction,
@@ -451,7 +451,7 @@ export async function contactsRoutes(fastify) {
         )
       ORDER BY te.sent_at DESC
       LIMIT 50
-    `).map(e => ({ ...e, body: emailSnippet(e.body) }))
+    `
 
     // Respuestas entrantes de correo (IMAP) — por contacto o por su correo remitente.
     const inboundEmailEvents = await sql`
@@ -461,7 +461,7 @@ export async function contactsRoutes(fastify) {
         'email_received' AS event_type,
         ei.received_at AS created_at,
         'Respuesta de correo' AS reference,
-        COALESCE(NULLIF(ei.body_text, ''), ei.subject) AS body,
+        COALESCE(NULLIF(ei.body_html, ''), NULLIF(ei.body_text, ''), ei.subject) AS body,
         'received' AS status,
         ei.from_email AS email,
         ei.from_name,

@@ -633,6 +633,41 @@ function separarCita(texto) {
   return { respuesta, citado }
 }
 
+// ¿El cuerpo del correo es HTML? (para renderizarlo con imágenes/formato en vez de texto plano)
+function esHtml(s) {
+  return typeof s === 'string' && /<(\w+)(\s|>|\/)/.test(s)
+}
+
+// Renderiza el HTML real del correo (imágenes, formato) dentro de un iframe AISLADO:
+// sandbox sin scripts → no se ejecuta JS (anti-XSS) y el CSS del correo no contamina la app.
+// allow-same-origin solo para medir el alto; allow-popups para abrir enlaces.
+function EmailHtmlFrame({ html }) {
+  const ref = useRef(null)
+  const [alto, setAlto] = useState(140)
+  const ajustar = () => {
+    try {
+      const doc = ref.current?.contentDocument
+      if (doc?.body) setAlto(Math.min(Math.max(doc.body.scrollHeight + 12, 60), 1600))
+    } catch { /* cross-origin: deja el alto por defecto */ }
+  }
+  const srcDoc =
+    '<!doctype html><html><head><meta charset="utf-8"><base target="_blank">' +
+    '<style>html,body{margin:0;padding:8px;font:13px/1.5 system-ui,-apple-system,sans-serif;color:#1e293b;word-break:break-word}' +
+    'img{max-width:100%!important;height:auto}table{max-width:100%}*{max-width:100%}</style></head><body>' +
+    (html || '') + '</body></html>'
+  return (
+    <iframe
+      ref={ref}
+      title="Contenido del correo"
+      sandbox="allow-same-origin allow-popups"
+      srcDoc={srcDoc}
+      onLoad={ajustar}
+      style={{ height: alto }}
+      className="mt-1.5 w-full rounded-lg border border-border bg-white"
+    />
+  )
+}
+
 // Devuelve {icon,label,color, who, origin} explicando el evento de forma clara.
 function describeEvent(event, contactName) {
   const chName = CHANNEL_NAME[event.channel] ?? 'Mensaje'
@@ -696,6 +731,8 @@ function TimelineItem({ event, last, contactName }) {
   const { respuesta, citado } = event.event_type === 'email_received'
     ? separarCita(event.body)
     : { respuesta: event.body, citado: '' }
+  // Si el correo trae HTML (imágenes/formato), se renderiza en iframe aislado en vez de texto.
+  const esEmailHtml = event.channel === 'email' && esHtml(event.body)
   // Detecta si el texto realmente se corta (más robusto que contar caracteres:
   // sirve para email, donde el cuerpo puede cortarse por líneas y no por longitud).
   useEffect(() => {
@@ -766,36 +803,43 @@ function TimelineItem({ event, last, contactName }) {
           </p>
         )}
 
-        {/* Cuerpo del mensaje (respuesta real) — con Ver más / Ver menos para textos largos */}
-        {respuesta && (
-          <div className="mt-1.5">
-            <p ref={bodyRef} className={cn('whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground',
-              !verMas && 'line-clamp-3')}>
-              {respuesta}
-            </p>
-            {truncado && (
-              <button type="button" onClick={() => setVerMas(v => !v)}
-                className="mt-1 text-xs font-medium text-jungle-green-600 hover:underline">
-                {verMas ? 'Ver menos' : 'Ver más'}
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Mensaje citado (conversación previa) — claramente diferenciado y colapsable */}
-        {citado && (
-          <div className="mt-2">
-            <button type="button" onClick={() => setVerCita(v => !v)}
-              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
-              <ChevronDown size={13} className={cn('transition-transform', verCita && 'rotate-180')} />
-              {verCita ? 'Ocultar mensaje citado' : 'Ver mensaje citado'}
-            </button>
-            {verCita && (
-              <div className="mt-1.5 whitespace-pre-line border-l-2 border-border bg-muted/30 px-3 py-2 text-xs italic text-muted-foreground">
-                {citado}
+        {/* Cuerpo del correo en HTML (imágenes/formato, iframe aislado) o mensaje en texto */}
+        {esEmailHtml ? (
+          <EmailHtmlFrame html={event.body} />
+        ) : (
+          <>
+            {/* Cuerpo del mensaje (respuesta real) — con Ver más / Ver menos para textos largos */}
+            {respuesta && (
+              <div className="mt-1.5">
+                <p ref={bodyRef} className={cn('whitespace-pre-line rounded-lg bg-muted/50 px-3 py-2 text-sm text-foreground',
+                  !verMas && 'line-clamp-3')}>
+                  {respuesta}
+                </p>
+                {truncado && (
+                  <button type="button" onClick={() => setVerMas(v => !v)}
+                    className="mt-1 text-xs font-medium text-jungle-green-600 hover:underline">
+                    {verMas ? 'Ver menos' : 'Ver más'}
+                  </button>
+                )}
               </div>
             )}
-          </div>
+
+            {/* Mensaje citado (conversación previa) — claramente diferenciado y colapsable */}
+            {citado && (
+              <div className="mt-2">
+                <button type="button" onClick={() => setVerCita(v => !v)}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+                  <ChevronDown size={13} className={cn('transition-transform', verCita && 'rotate-180')} />
+                  {verCita ? 'Ocultar mensaje citado' : 'Ver mensaje citado'}
+                </button>
+                {verCita && (
+                  <div className="mt-1.5 whitespace-pre-line border-l-2 border-border bg-muted/30 px-3 py-2 text-xs italic text-muted-foreground">
+                    {citado}
+                  </div>
+                )}
+              </div>
+            )}
+          </>
         )}
 
         {/* Estado + origen */}
