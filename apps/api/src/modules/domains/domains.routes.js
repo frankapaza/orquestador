@@ -132,6 +132,33 @@ export async function domainsRoutes(fastify) {
     `
   })
 
+  // Hilo de correo (enviados + recibidos) con una dirección. Lo consume MCOB para
+  // mostrar la conversación de correo con el cliente. Ordenado cronológicamente.
+  fastify.get('/email/thread', auth, async (req) => {
+    const address = String(req.query.address || '').trim().toLowerCase()
+    if (!address) return []
+
+    const enviados = await sql`
+      SELECT 'out' AS direction, te.subject, te.body,
+             te.from_email, te.from_name, te.recipient_email AS counterpart,
+             te.status, te.sent_at AS at
+      FROM transactional_emails te
+      WHERE te.client_id = ${req.user.sub} AND te.sent_at IS NOT NULL
+        AND lower(te.recipient_email) = ${address}
+    `
+    const recibidos = await sql`
+      SELECT 'in' AS direction, ei.subject,
+             COALESCE(NULLIF(ei.body_text, ''), ei.body_html) AS body,
+             ei.from_email, ei.from_name, ei.to_email AS counterpart,
+             NULL AS status, ei.received_at AS at
+      FROM email_inbound ei
+      WHERE ei.client_id = ${req.user.sub} AND lower(ei.from_email) = ${address}
+    `
+    return [...enviados, ...recibidos]
+      .sort((a, b) => new Date(a.at) - new Date(b.at))
+      .slice(-100)
+  })
+
   // --- Dominios ---
 
   fastify.get('/domains', auth, async (req) => {
