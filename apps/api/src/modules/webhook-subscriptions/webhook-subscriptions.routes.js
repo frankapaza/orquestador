@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import crypto from 'node:crypto'
 import { sql } from '../../lib/db.js'
 
 const VALID_EVENTS = ['message.received', 'message.sent', 'message.delivered', 'message.read', 'conversation.created', 'email.received']
@@ -65,9 +66,16 @@ export async function webhookSubscriptionsRoutes(fastify) {
 
     try {
       const body = JSON.stringify({ event: 'test', payload: { message: 'Webhook de prueba desde Kubo' }, timestamp: new Date().toISOString() })
+      // Firmar el payload de prueba igual que los eventos reales, para que el receptor
+      // (que valida la firma) acepte también el "Probar".
+      const headers = { 'Content-Type': 'application/json' }
+      if (sub.secret) {
+        const sig = crypto.createHmac('sha256', sub.secret).update(body).digest('hex')
+        headers['X-Kubo-Signature'] = `sha256=${sig}`
+      }
       const res = await fetch(sub.url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body,
         signal: AbortSignal.timeout(8000),
       })
