@@ -661,7 +661,7 @@ function EmailHtmlFrame({ html }) {
       title="Contenido del correo"
       sandbox="allow-same-origin allow-popups"
       srcDoc={srcDoc}
-      onLoad={ajustar}
+      onLoad={() => { ajustar(); setTimeout(ajustar, 400); setTimeout(ajustar, 1200) }}
       style={{ height: alto }}
       className="mt-1.5 w-full rounded-lg border border-border bg-white"
     />
