@@ -20,6 +20,7 @@ const ALL_EVENTS = [
   { value: 'message.delivered', label: 'Mensaje entregado',  desc: 'Cuando el mensaje llega al dispositivo' },
   { value: 'message.read',      label: 'Mensaje leído',      desc: 'Cuando el contacto lee el mensaje (WA)' },
   { value: 'conversation.created', label: 'Nueva conversación', desc: 'Cuando se inicia una conversación nueva' },
+  { value: 'email.received',    label: 'Respuesta de correo', desc: 'Cuando un cliente responde un correo (IMAP)' },
 ]
 
 const GUIDE_STEPS = [
