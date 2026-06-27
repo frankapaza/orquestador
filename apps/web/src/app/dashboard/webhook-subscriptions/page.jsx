@@ -51,6 +51,7 @@ const EMPTY = { name: '', url: '', events: [], secret: '' }
 export default function WebhookSubscriptionsPage() {
   const [subs, setSubs]         = useState([])
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState(null)   // null = creando · id = editando
   const [form, setForm]         = useState(EMPTY)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState(null)
@@ -70,20 +71,39 @@ export default function WebhookSubscriptionsPage() {
     }))
   }
 
+  function abrirNuevo() {
+    setForm(EMPTY); setEditingId(null); setError(null); setShowForm(true)
+  }
+
+  function abrirEditar(sub) {
+    setForm({ name: sub.name || '', url: sub.url || '', events: sub.events || [], secret: '' })
+    setEditingId(sub.id); setError(null); setShowForm(true)
+  }
+
+  function cerrarForm() {
+    setShowForm(false); setError(null); setForm(EMPTY); setEditingId(null)
+  }
+
   async function submit(e) {
     e.preventDefault()
     if (form.events.length === 0) { setError('Selecciona al menos un evento'); return }
     setLoading(true)
     setError(null)
     try {
-      await api.post('/webhook-subscriptions', {
-        name:   form.name,
-        url:    form.url,
-        events: form.events,
-        secret: form.secret || undefined,
-      })
-      setShowForm(false)
-      setForm(EMPTY)
+      if (editingId) {
+        // Editar: el secret solo se envía si el usuario escribió uno nuevo (vacío = mantener).
+        const payload = { name: form.name, url: form.url, events: form.events }
+        if (form.secret) payload.secret = form.secret
+        await api.patch(`/webhook-subscriptions/${editingId}`, payload)
+      } else {
+        await api.post('/webhook-subscriptions', {
+          name:   form.name,
+          url:    form.url,
+          events: form.events,
+          secret: form.secret || undefined,
+        })
+      }
+      cerrarForm()
       load()
     } catch (err) {
       setError(err.response?.data?.error ?? 'Error al guardar')
@@ -123,7 +143,7 @@ export default function WebhookSubscriptionsPage() {
         title="Webhooks"
         description="Notifica a tu CRM u otros sistemas cuando ocurren eventos en tiempo real"
         action={
-          <Button onClick={() => setShowForm(true)}>
+          <Button onClick={abrirNuevo}>
             <Plus size={16} strokeWidth={2} /> Nueva suscripción
           </Button>
         }
@@ -162,11 +182,12 @@ export default function WebhookSubscriptionsPage() {
       {/* Modal crear suscripción */}
       {showForm && (
         <div className="modal-overlay fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl border bg-card shadow-lg">
-            <div className="border-b px-6 py-5">
-              <h2 className="text-base font-semibold text-foreground">Nueva suscripción de webhook</h2>
+          <div className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border bg-card shadow-lg">
+            <div className="shrink-0 border-b px-6 py-5">
+              <h2 className="text-base font-semibold text-foreground">{editingId ? 'Editar suscripción de webhook' : 'Nueva suscripción de webhook'}</h2>
               <p className="mt-1 text-sm text-muted-foreground">Kubo hará un POST a tu URL cuando ocurran los eventos seleccionados.</p>
             </div>
+            <div className="overflow-y-auto">
             {error && (
               <div className="mx-6 mt-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 <AlertTriangle size={16} strokeWidth={2} className="shrink-0" /> {error}
@@ -204,7 +225,7 @@ export default function WebhookSubscriptionsPage() {
                 <Input
                   value={form.secret}
                   onChange={e => setForm(f => ({ ...f, secret: e.target.value }))}
-                  type="password" placeholder="Dejar vacío si no necesitas verificación de firma"
+                  type="password" placeholder={editingId ? 'Dejar vacío para mantener el secret actual' : 'Dejar vacío si no necesitas verificación de firma'}
                   className="h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0"
                 />
               </div>
@@ -242,17 +263,18 @@ export default function WebhookSubscriptionsPage() {
 
               <div className="flex gap-3 pt-1">
                 <Button type="submit" disabled={loading} className="flex-1">
-                  {loading ? 'Guardando...' : <><Save size={16} strokeWidth={2} /> Guardar suscripción</>}
+                  {loading ? 'Guardando...' : <><Save size={16} strokeWidth={2} /> {editingId ? 'Guardar cambios' : 'Guardar suscripción'}</>}
                 </Button>
                 <Button
                   type="button"
                   variant="outline"
                   className="flex-1"
-                  onClick={() => { setShowForm(false); setError(null); setForm(EMPTY) }}>
+                  onClick={cerrarForm}>
                   Cancelar
                 </Button>
               </div>
             </form>
+            </div>
           </div>
         </div>
       )}
@@ -294,6 +316,9 @@ export default function WebhookSubscriptionsPage() {
                   disabled={testing === sub.id}>
                   {testing === sub.id ? 'Probando...' : <><RefreshCw size={14} strokeWidth={2} /> Probar</>}
                 </Button>
+                <Button variant="outline" size="sm" onClick={() => abrirEditar(sub)}>
+                  Editar
+                </Button>
                 <Button variant="outline" size="sm" onClick={() => toggleActive(sub)}>
                   {sub.is_active ? 'Pausar' : 'Activar'}
                 </Button>
@@ -321,7 +346,7 @@ export default function WebhookSubscriptionsPage() {
               title="Sin webhooks configurados"
               description="Configura un webhook para que tu CRM reciba notificaciones en tiempo real cuando lleguen mensajes o cambien estados."
               action={
-                <Button onClick={() => setShowForm(true)}>
+                <Button onClick={abrirNuevo}>
                   <Plus size={16} strokeWidth={2} /> Crear primera suscripción
                 </Button>
               }
