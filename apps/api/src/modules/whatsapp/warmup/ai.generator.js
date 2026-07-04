@@ -5,8 +5,15 @@ import { decrypt } from '../../../lib/crypto.js'
 // OpenAI (POST {base}/chat/completions), así que un solo cliente sirve.
 export const AI_PRESETS = {
   openai:   { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  deepseek: { base_url: 'https://api.deepseek.com',  model: 'deepseek-chat' },
+  deepseek: { base_url: 'https://api.deepseek.com',  model: 'deepseek-v4-flash' },
   custom:   { base_url: '',                          model: '' },
+}
+
+// Modelos válidos sugeridos por proveedor (para ayuda en la UI).
+export const AI_MODEL_HINTS = {
+  openai:   ['gpt-4o-mini', 'gpt-4o'],
+  deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+  custom:   [],
 }
 
 export function resolveAiSettings(cfg) {

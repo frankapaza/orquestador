@@ -5,7 +5,7 @@ import { baileysManager } from '../baileys.manager.js'
 import { getWarmupConfig, upsertWarmupConfig } from './warmup.service.js'
 import { seedWarmupCatalog } from './catalog.seed.js'
 import { recomputeRisk } from './risk.service.js'
-import { generateCatalog, testAiConnection, AI_PRESETS } from './ai.generator.js'
+import { generateCatalog, testAiConnection, AI_PRESETS, AI_MODEL_HINTS } from './ai.generator.js'
 
 // Nunca exponer la key cifrada al frontend; solo si existe.
 function publicConfig(cfg) {
@@ -64,6 +64,7 @@ export async function warmupRoutes(fastify) {
       ai_base_url: cfg.ai_base_url ?? '',
       has_ai_key:  !!cfg.ai_api_key_enc,
       presets:     AI_PRESETS,
+      model_hints: AI_MODEL_HINTS,
     }
   })
 

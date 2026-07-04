@@ -410,6 +410,16 @@ function AiAgentTab() {
             </Field>
             <Field label="Modelo">
               <Input className={INPUT_CLASS} value={ai.ai_model ?? ''} placeholder={providerModel} onChange={e => setField('ai_model', e.target.value)} />
+              {ai.model_hints?.[ai.ai_provider]?.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Válidos: {ai.model_hints[ai.ai_provider].map((m, i) => (
+                    <span key={m}>
+                      {i > 0 && ' · '}
+                      <button type="button" onClick={() => setField('ai_model', m)} className="font-mono text-jungle-green-700 hover:underline">{m}</button>
+                    </span>
+                  ))}
+                </p>
+              )}
             </Field>
           </div>
 
