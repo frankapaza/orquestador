@@ -160,10 +160,23 @@ export async function sentTodayFor(accountId) {
 
 // ── Catálogo de conversaciones ───────────────────────────────────────────────
 export async function getActiveConversations(clientId) {
-  return sql`
+  const rows = await sql`
     SELECT id, topic, turns FROM warmup_conversations
     WHERE (client_id = ${clientId} OR client_id IS NULL) AND is_active = true
   `
+  // Normalizar turns: algunas filas quedaron guardadas como string JSON (doble
+  // codificación en columna JSONB). Garantizar siempre un array de turnos.
+  return rows.map(r => ({
+    ...r,
+    turns: typeof r.turns === 'string' ? safeParseTurns(r.turns) : (Array.isArray(r.turns) ? r.turns : []),
+  }))
+}
+
+function safeParseTurns(s) {
+  try {
+    const v = JSON.parse(s)
+    return Array.isArray(v) ? v : []
+  } catch { return [] }
 }
 
 // Delay aleatorio en ms entre dos mensajes según config.
