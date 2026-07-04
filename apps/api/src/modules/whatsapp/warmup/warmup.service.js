@@ -9,6 +9,7 @@ export const DEFAULT_WARMUP_CONFIG = {
   active_hours_start: '08:00',
   active_hours_end:   '20:00',
   active_days:        'mon,tue,wed,thu,fri',
+  timezone:           'America/Lima',
   ramp_start:         5,
   ramp_end:           40,
   ramp_mode:          'linear',
@@ -29,7 +30,7 @@ export async function upsertWarmupConfig(clientId, patch) {
   // Solo columnas válidas de la tabla
   const cols = [
     'is_enabled', 'warmup_days', 'delay_min_sec', 'delay_max_sec',
-    'active_hours_start', 'active_hours_end', 'active_days',
+    'active_hours_start', 'active_hours_end', 'active_days', 'timezone',
     'ramp_start', 'ramp_end', 'ramp_mode', 'daily_cap',
     'internal_ratio', 'simulate_typing', 'mark_read',
   ]
@@ -73,12 +74,27 @@ export function rampTargetForDay(cfg, day) {
 // ── Ventana horaria y días activos ───────────────────────────────────────────
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 
+// Hora/minuto/día de la semana ACTUAL en la zona horaria indicada (default Perú).
+export function localParts(timezone = 'America/Lima', now = new Date()) {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hour12: false,
+    })
+    const p = Object.fromEntries(fmt.formatToParts(now).map(x => [x.type, x.value]))
+    return { hour: parseInt(p.hour, 10) % 24, minute: parseInt(p.minute, 10), day: p.weekday.toLowerCase().slice(0, 3) }
+  } catch {
+    return { hour: now.getHours(), minute: now.getMinutes(), day: DAY_KEYS[now.getDay()] }
+  }
+}
+
 export function isActiveNow(cfg, now = new Date()) {
+  const { hour, minute, day } = localParts(cfg.timezone || 'America/Lima', now)
+
   const activeDays = (cfg.active_days ?? '').split(',').map(s => s.trim()).filter(Boolean)
-  if (activeDays.length && !activeDays.includes(DAY_KEYS[now.getDay()])) return false
+  if (activeDays.length && !activeDays.includes(day)) return false
 
   const pad = n => String(n).padStart(2, '0')
-  const cur   = `${pad(now.getHours())}:${pad(now.getMinutes())}`
+  const cur   = `${pad(hour)}:${pad(minute)}`
   const start = (cfg.active_hours_start ?? '00:00').slice(0, 5)
   const end   = (cfg.active_hours_end ?? '23:59').slice(0, 5)
   return cur >= start && cur <= end
@@ -101,10 +117,20 @@ export async function internalAccountsByPhone(clientId) {
 }
 
 // ── Stats diarias agregadas (contador ligero, sin guardar contenido) ─────────
-function today() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+// Fecha de "hoy" en hora peruana (America/Lima), para que el día ruede a la
+// medianoche de Perú y no a la del servidor (UTC).
+export function todayLima() {
+  try {
+    // en-CA formatea como YYYY-MM-DD
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date())
+  } catch {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  }
 }
+const today = todayLima
 
 export async function recordWarmupSent(accountId, n = 1) {
   await sql`

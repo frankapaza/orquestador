@@ -1,5 +1,6 @@
 import { sql } from '../../../lib/db.js'
 import { createAlert } from './alerts.service.js'
+import { todayLima } from './warmup.service.js'
 
 // Score de riesgo de baneo (heurístico, 0-100). No es una certeza: es una
 // estimación por señales indirectas para pausar ANTES de llegar al ban.
@@ -45,7 +46,7 @@ function levelFor(score) {
 // Recalcula el riesgo de todos los chips (o de un cliente). Pausa el warmup de
 // los que entren en rojo (medida preventiva) y devuelve el resumen.
 export async function recomputeRisk(clientId = null) {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayLima()
 
   const accounts = await sql`
     SELECT wa.*,

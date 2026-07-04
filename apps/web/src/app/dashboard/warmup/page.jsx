@@ -108,6 +108,7 @@ export default function WarmupPage() {
         active_hours_start: cfg.active_hours_start?.slice(0, 5),
         active_hours_end:   cfg.active_hours_end?.slice(0, 5),
         active_days:        cfg.active_days,
+        timezone:           cfg.timezone || 'America/Lima',
         ramp_start:         Number(cfg.ramp_start),
         ramp_end:           Number(cfg.ramp_end),
         ramp_mode:          cfg.ramp_mode,
@@ -269,6 +270,17 @@ export default function WarmupPage() {
             <span className={label}>Hora fin</span>
             <input type="time" className={input} value={cfg.active_hours_end?.slice(0, 5) ?? '20:00'}
                    onChange={e => setField('active_hours_end', e.target.value)} />
+          </div>
+          <div>
+            <span className={label}>Zona horaria</span>
+            <select className={input} value={cfg.timezone || 'America/Lima'} onChange={e => setField('timezone', e.target.value)}>
+              <option value="America/Lima">Perú (Lima) UTC−5</option>
+              <option value="America/Bogota">Colombia (Bogotá) UTC−5</option>
+              <option value="America/Mexico_City">México (CDMX) UTC−6</option>
+              <option value="America/Santiago">Chile (Santiago)</option>
+              <option value="America/Argentina/Buenos_Aires">Argentina (Bs. As.) UTC−3</option>
+              <option value="UTC">UTC</option>
+            </select>
           </div>
           <div>
             <span className={label}>Rampa</span>

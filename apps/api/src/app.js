@@ -167,7 +167,7 @@ if (WORKERS_DISABLED) {
     } catch (err) {
       fastify.log.error({ err }, '[Cron] Error en regeneración semanal de catálogo')
     }
-  })
+  }, { timezone: 'America/Lima' })
 
   // Reset diario de contadores sent_today a medianoche
   cron.schedule('0 0 * * *', async () => {
@@ -180,7 +180,7 @@ if (WORKERS_DISABLED) {
     } catch (err) {
       fastify.log.error({ err }, '[Cron] Error en tareas diarias de medianoche')
     }
-  })
+  }, { timezone: 'America/Lima' })
 }
 
 try {

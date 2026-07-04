@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { sql } from '../../../lib/db.js'
 import { encrypt } from '../../../lib/crypto.js'
 import { baileysManager } from '../baileys.manager.js'
-import { getWarmupConfig, upsertWarmupConfig } from './warmup.service.js'
+import { getWarmupConfig, upsertWarmupConfig, todayLima } from './warmup.service.js'
 import { seedWarmupCatalog } from './catalog.seed.js'
 import { recomputeRisk } from './risk.service.js'
 import { generateCatalog, testAiConnection, AI_PRESETS, AI_MODEL_HINTS } from './ai.generator.js'
@@ -23,6 +23,7 @@ const configSchema = z.object({
   active_hours_start: timeStr.optional(),
   active_hours_end:   timeStr.optional(),
   active_days:        z.string().optional(),
+  timezone:           z.string().max(64).optional(),
   ramp_start:         z.number().int().min(1).optional(),
   ramp_end:           z.number().int().min(1).optional(),
   ramp_mode:          z.enum(['linear', 'steps']).optional(),
@@ -155,7 +156,7 @@ export async function warmupRoutes(fastify) {
   // ── Estado del warmup por chip ────────────────────────────────────────────
   fastify.get('/whatsapp/warmup/status', { onRequest: pre }, async (req) => {
     const memberFilter = req.user.member_id ? sql`AND wa.assigned_member_id = ${req.user.member_id}` : sql``
-    const today = new Date().toISOString().slice(0, 10)
+    const today = todayLima()
 
     const rows = await sql`
       SELECT wa.id, wa.name, wa.phone_number, wa.instance_name,
