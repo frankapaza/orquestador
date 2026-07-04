@@ -79,6 +79,11 @@ export default function WarmupPage() {
     return () => clearInterval(t)
   }, [])
 
+  // Abrir automáticamente la conversación más reciente al entrar.
+  useEffect(() => {
+    if (!activeThread && chats.length > 0) setActiveThread(chats[0].thread_key)
+  }, [chats, activeThread])
+
   // Cargar (y refrescar) los mensajes del hilo activo.
   useEffect(() => {
     if (!activeThread) return
