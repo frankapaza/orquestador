@@ -6,6 +6,8 @@ import { getWarmupConfig, upsertWarmupConfig, todayLima } from './warmup.service
 import { seedWarmupCatalog } from './catalog.seed.js'
 import { recomputeRisk } from './risk.service.js'
 import { generateCatalog, testAiConnection, AI_PRESETS, AI_MODEL_HINTS } from './ai.generator.js'
+import { runTickForClient } from './warmup.scheduler.js'
+import { drainWarmupJobs } from './warmup.queue.js'
 
 // Nunca exponer la key cifrada al frontend; solo si existe.
 function publicConfig(cfg) {
@@ -54,6 +56,38 @@ export async function warmupRoutes(fastify) {
     // Al habilitar el warmup por primera vez, sembrar el catálogo si está vacío.
     if (patch.is_enabled) await seedWarmupCatalog(req.user.sub).catch(() => {})
     return publicConfig(await upsertWarmupConfig(req.user.sub, patch))
+  })
+
+  // ── Control: Iniciar / Pausar / Detener ───────────────────────────────────
+  // Iniciar: activa el warmup y dispara un tick INMEDIATO (encola conversaciones
+  // ya, sin esperar el ciclo de 10 min). Sirve también para "generar ahora"
+  // cuando se agregan chips nuevos.
+  fastify.post('/whatsapp/warmup/start', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    await upsertWarmupConfig(req.user.sub, { is_enabled: true })
+    await seedWarmupCatalog(req.user.sub).catch(() => {})
+    await runTickForClient(req.user.sub)
+    return { ok: true, status: 'running' }
+  })
+
+  // Pausar: detiene el warmup pero conserva el progreso (día de rampa, selección).
+  fastify.post('/whatsapp/warmup/pause', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    await upsertWarmupConfig(req.user.sub, { is_enabled: false })
+    return { ok: true, status: 'paused' }
+  })
+
+  // Detener: apaga el warmup, reinicia la rampa de los chips y vacía la cola.
+  fastify.post('/whatsapp/warmup/stop', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    await upsertWarmupConfig(req.user.sub, { is_enabled: false })
+    await sql`
+      UPDATE whatsapp_accounts
+      SET warmup_started_at = null, warmup_day = 0
+      WHERE client_id = ${req.user.sub} AND provider = 'baileys'
+    `
+    await drainWarmupJobs()
+    return { ok: true, status: 'stopped' }
   })
 
   // ── Agente IA (generación del catálogo) ───────────────────────────────────

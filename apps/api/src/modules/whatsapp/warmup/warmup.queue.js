@@ -20,6 +20,12 @@ export async function enqueueWarmupTurn(data, delayMs) {
   })
 }
 
+// Vacía la cola (mensajes en espera y retardados) — usado por el botón Detener.
+export async function drainWarmupJobs() {
+  try { await warmupQueue.drain(true) }
+  catch (e) { console.error('[Warmup] drain:', e.message) }
+}
+
 export function startWarmupWorker() {
   const worker = new Worker(
     QUEUE_NAME,

@@ -28,6 +28,7 @@ export default function WarmupPage() {
   const [activeThread, setActiveThread] = useState(null)
   const [threadMsgs, setThreadMsgs] = useState([])
   const [alerts, setAlerts]   = useState([])
+  const [ctrlBusy, setCtrlBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
   const [msg, setMsg]         = useState(null)
@@ -87,6 +88,17 @@ export default function WarmupPage() {
       await api.post(`/whatsapp/warmup/alerts/${id}/ack`)
       setAlerts(a => a.filter(x => x.id !== id))
     } catch { flash('error', 'No se pudo marcar la alerta') }
+  }
+
+  async function control(action, okText) {
+    setCtrlBusy(true)
+    try {
+      await api.post(`/whatsapp/warmup/${action}`)
+      await load()
+      flash('ok', okText)
+    } catch (e) {
+      flash('error', e.response?.data?.error ?? 'No se pudo completar la acción')
+    } finally { setCtrlBusy(false) }
   }
 
   function setField(k, v) { setCfg(p => ({ ...p, [k]: v })) }
@@ -185,6 +197,27 @@ export default function WarmupPage() {
           {redCount > 0 && <span className="font-medium text-red-600">⚠️ {redCount} en riesgo</span>}
         </div>
       </div>
+
+      {/* Controles: Iniciar / Pausar / Detener */}
+      <section className={`${card} flex flex-wrap items-center gap-3 p-4`}>
+        <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${cfg.is_enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground'}`}>
+          <span className={`h-2 w-2 rounded-full ${cfg.is_enabled ? 'bg-emerald-500' : 'bg-gray-400'}`} />
+          {cfg.is_enabled ? 'En marcha' : 'Detenido'}
+        </span>
+        <button onClick={() => control('start', 'Calentamiento iniciado — generando conversaciones')} disabled={ctrlBusy}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-jungle-green-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-jungle-green-700 disabled:opacity-60">
+          ▶ Iniciar / generar ahora
+        </button>
+        <button onClick={() => control('pause', 'Calentamiento pausado')} disabled={ctrlBusy || !cfg.is_enabled}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50">
+          ⏸ Pausar
+        </button>
+        <button onClick={() => { if (confirm('¿Detener el calentamiento? Se reinicia la rampa y se vacía la cola de mensajes pendientes.')) control('stop', 'Calentamiento detenido y rampa reiniciada') }} disabled={ctrlBusy}
+          className="inline-flex items-center gap-1.5 rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-60">
+          ⏹ Detener
+        </button>
+        <span className="text-xs text-muted-foreground">“Iniciar” arranca al instante e incluye chips nuevos.</span>
+      </section>
 
       {msg && (
         <div className={`rounded-xl px-4 py-2.5 text-sm ${msg.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>

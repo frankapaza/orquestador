@@ -178,3 +178,9 @@ export async function runWarmupTick() {
     catch (e) { console.error(`[Warmup] tick cliente ${client_id} falló:`, e.message) }
   }
 }
+
+// Dispara un tick inmediato para un solo cliente (botón "Iniciar / generar ahora").
+export async function runTickForClient(clientId) {
+  try { await tickClient(clientId) }
+  catch (e) { console.error(`[Warmup] tick manual cliente ${clientId} falló:`, e.message) }
+}
