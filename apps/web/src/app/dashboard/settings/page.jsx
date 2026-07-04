@@ -377,7 +377,13 @@ function AiAgentTab() {
   async function save(e) {
     e.preventDefault(); setBusy(true); setMsg(null)
     try {
-      const payload = { ai_provider: ai.ai_provider, ai_model: ai.ai_model || null, ai_base_url: ai.ai_base_url || null }
+      // Para proveedores conocidos, solo se acepta un modelo de la lista; si no,
+      // se envía null y el backend usa el modelo por defecto válido.
+      const known = ai.model_hints?.[ai.ai_provider] ?? []
+      const model = ai.ai_provider === 'custom'
+        ? (ai.ai_model || null)
+        : (known.includes(ai.ai_model) ? ai.ai_model : null)
+      const payload = { ai_provider: ai.ai_provider, ai_model: model, ai_base_url: ai.ai_base_url || null }
       if (apiKey.trim()) payload.api_key = apiKey.trim()
       const { data } = await api.put('/whatsapp/warmup/ai', payload)
       setAi(a => ({ ...a, ...data })); setApiKey('')
@@ -395,6 +401,11 @@ function AiAgentTab() {
 
   if (!ai) return <div className="text-sm text-muted-foreground">Cargando…</div>
   const providerModel = ai.presets?.[ai.ai_provider]?.model ?? 'auto'
+  const knownModels   = ai.model_hints?.[ai.ai_provider] ?? []
+  // Valor mostrado en el select: '' = usar el modelo por defecto del proveedor.
+  const modelValue = ai.ai_provider === 'custom'
+    ? (ai.ai_model ?? '')
+    : (knownModels.includes(ai.ai_model) ? ai.ai_model : '')
 
   return (
     <div className="space-y-4">
@@ -409,16 +420,13 @@ function AiAgentTab() {
               </select>
             </Field>
             <Field label="Modelo">
-              <Input className={INPUT_CLASS} value={ai.ai_model ?? ''} placeholder={providerModel} onChange={e => setField('ai_model', e.target.value)} />
-              {ai.model_hints?.[ai.ai_provider]?.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Válidos: {ai.model_hints[ai.ai_provider].map((m, i) => (
-                    <span key={m}>
-                      {i > 0 && ' · '}
-                      <button type="button" onClick={() => setField('ai_model', m)} className="font-mono text-jungle-green-700 hover:underline">{m}</button>
-                    </span>
-                  ))}
-                </p>
+              {ai.ai_provider === 'custom' ? (
+                <Input className={INPUT_CLASS} value={ai.ai_model ?? ''} placeholder="nombre-del-modelo" onChange={e => setField('ai_model', e.target.value)} />
+              ) : (
+                <select className={`${INPUT_CLASS} w-full px-3`} value={modelValue} onChange={e => setField('ai_model', e.target.value)}>
+                  <option value="">Por defecto ({providerModel})</option>
+                  {knownModels.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
               )}
             </Field>
           </div>
