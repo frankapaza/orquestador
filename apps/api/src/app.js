@@ -35,6 +35,7 @@ import { warmupRoutes } from './modules/whatsapp/warmup/warmup.routes.js'
 import { startWarmupWorker } from './modules/whatsapp/warmup/warmup.queue.js'
 import { runWarmupTick } from './modules/whatsapp/warmup/warmup.scheduler.js'
 import { recomputeRisk } from './modules/whatsapp/warmup/risk.service.js'
+import { generateCatalog, pruneAiCatalog } from './modules/whatsapp/warmup/ai.generator.js'
 import { sql } from './lib/db.js'
 
 const fastify = Fastify({
@@ -147,13 +148,37 @@ if (WORKERS_DISABLED) {
     }
   })
 
+  // Regeneración semanal del catálogo IA (domingo 03:00 hora del servidor).
+  cron.schedule('0 3 * * 0', async () => {
+    try {
+      const clients = await sql`
+        SELECT client_id FROM warmup_config
+        WHERE is_enabled = true AND ai_auto_weekly = true AND ai_api_key_enc IS NOT NULL
+      `
+      for (const { client_id } of clients) {
+        try {
+          const r = await generateCatalog(client_id, 20)
+          const pruned = await pruneAiCatalog(client_id, 60)
+          fastify.log.info(`[Cron] Warmup IA: +${r.generated} diálogos, -${pruned} podados (cliente ${client_id})`)
+        } catch (e) {
+          fastify.log.error(`[Cron] Warmup IA cliente ${client_id}: ${e.message}`)
+        }
+      }
+    } catch (err) {
+      fastify.log.error({ err }, '[Cron] Error en regeneración semanal de catálogo')
+    }
+  })
+
   // Reset diario de contadores sent_today a medianoche
   cron.schedule('0 0 * * *', async () => {
     try {
       const result = await sql`UPDATE email_accounts SET sent_today = 0`
       fastify.log.info(`[Cron] Contadores diarios reseteados: ${result.count} cuentas`)
+      // Retención del chat de warmup: borrar mensajes de más de 7 días.
+      const del = await sql`DELETE FROM warmup_messages WHERE created_at < now() - interval '7 days'`
+      fastify.log.info(`[Cron] Mensajes de warmup purgados: ${del.count}`)
     } catch (err) {
-      fastify.log.error({ err }, '[Cron] Error al resetear contadores diarios')
+      fastify.log.error({ err }, '[Cron] Error en tareas diarias de medianoche')
     }
   })
 }

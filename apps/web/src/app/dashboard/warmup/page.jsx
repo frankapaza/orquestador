@@ -24,6 +24,10 @@ export default function WarmupPage() {
   const [ai, setAi]           = useState(null)
   const [aiBusy, setAiBusy]   = useState(false)
   const [genCount, setGenCount] = useState(20)
+  const [chats, setChats]       = useState([])
+  const [activeThread, setActiveThread] = useState(null)
+  const [threadMsgs, setThreadMsgs] = useState([])
+  const [alerts, setAlerts]   = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
   const [msg, setMsg]         = useState(null)
@@ -31,16 +35,20 @@ export default function WarmupPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [c, s, cat, aiRes] = await Promise.all([
+      const [c, s, cat, aiRes, ch, al] = await Promise.all([
         api.get('/whatsapp/warmup/config'),
         api.get('/whatsapp/warmup/status'),
         api.get('/whatsapp/warmup/catalog'),
         api.get('/whatsapp/warmup/ai'),
+        api.get('/whatsapp/warmup/chats'),
+        api.get('/whatsapp/warmup/alerts'),
       ])
       setCfg(c.data)
       setChips(s.data)
       setCatalog(cat.data)
       setAi(aiRes.data)
+      setChats(ch.data)
+      setAlerts(al.data)
     } catch (e) {
       setMsg({ type: 'error', text: 'No se pudo cargar la configuración' })
     } finally {
@@ -50,9 +58,35 @@ export default function WarmupPage() {
 
   useEffect(() => { load() }, [load])
 
+  // Auto-refresh de la lista de chats cada 6s.
+  useEffect(() => {
+    const t = setInterval(() => {
+      api.get('/whatsapp/warmup/chats').then(r => setChats(r.data)).catch(() => {})
+    }, 6000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Cargar (y refrescar) los mensajes del hilo activo.
+  useEffect(() => {
+    if (!activeThread) return
+    let alive = true
+    const fetchMsgs = () => api.get('/whatsapp/warmup/chat', { params: { thread: activeThread } })
+      .then(r => { if (alive) setThreadMsgs(r.data) }).catch(() => {})
+    fetchMsgs()
+    const t = setInterval(fetchMsgs, 6000)
+    return () => { alive = false; clearInterval(t) }
+  }, [activeThread])
+
   function flash(type, text) {
     setMsg({ type, text })
     setTimeout(() => setMsg(null), 3500)
+  }
+
+  async function ackAlert(id) {
+    try {
+      await api.post(`/whatsapp/warmup/alerts/${id}/ack`)
+      setAlerts(a => a.filter(x => x.id !== id))
+    } catch { flash('error', 'No se pudo marcar la alerta') }
   }
 
   function setField(k, v) { setCfg(p => ({ ...p, [k]: v })) }
@@ -155,6 +189,30 @@ export default function WarmupPage() {
         <div className={`rounded-xl px-4 py-2.5 text-sm ${msg.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
           {msg.text}
         </div>
+      )}
+
+      {alerts.length > 0 && (
+        <section className="rounded-2xl border border-red-200 bg-red-50 p-4">
+          <p className="mb-2 flex items-center gap-2 text-sm font-semibold text-red-700">
+            🚨 {alerts.length} alerta(s) de riesgo
+          </p>
+          <ul className="space-y-2">
+            {alerts.map(a => (
+              <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">
+                    {a.account_name} · <span className="text-red-600">{a.level === 'banned' ? 'Baneado' : 'Riesgo alto'}</span>
+                  </p>
+                  <p className="truncate text-xs text-muted-foreground">{a.reason}</p>
+                </div>
+                <button onClick={() => ackAlert(a.id)}
+                  className="shrink-0 rounded-lg border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted">
+                  Marcar leída
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {/* Configuración global */}
@@ -320,6 +378,54 @@ export default function WarmupPage() {
               )
             })}
           </ul>
+        )}
+      </section>
+
+      {/* Conversaciones (chat) */}
+      <section className={card}>
+        <div className="border-b p-5">
+          <h2 className="text-sm font-semibold text-foreground">💬 Conversaciones</h2>
+          <p className="text-xs text-muted-foreground">Lo que se están diciendo los chips (se actualiza solo · historial de 7 días).</p>
+        </div>
+        {chats.length === 0 ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">Aún no hay mensajes de calentamiento.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-[240px_1fr]">
+            {/* Lista de hilos */}
+            <ul className="max-h-96 divide-y overflow-y-auto border-r">
+              {chats.map(t => (
+                <li key={t.thread_key}>
+                  <button onClick={() => setActiveThread(t.thread_key)}
+                    className={`w-full px-4 py-3 text-left transition-colors hover:bg-muted/50 ${activeThread === t.thread_key ? 'bg-muted/60' : ''}`}>
+                    <p className="truncate text-sm font-medium text-foreground">{t.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{t.last_text}</p>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {/* Burbujas del hilo activo */}
+            <div className="max-h-96 space-y-2 overflow-y-auto p-4">
+              {!activeThread ? (
+                <p className="pt-8 text-center text-sm text-muted-foreground">Elige una conversación para verla.</p>
+              ) : threadMsgs.length === 0 ? (
+                <p className="pt-8 text-center text-sm text-muted-foreground">Sin mensajes.</p>
+              ) : (
+                threadMsgs.map((m) => {
+                  // Alinear por emisor: el primer emisor del hilo va a la izquierda.
+                  const leftId = threadMsgs[0].from_account_id
+                  const mine = m.from_account_id === leftId
+                  return (
+                    <div key={m.id} className={`flex ${mine ? 'justify-start' : 'justify-end'}`}>
+                      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${mine ? 'bg-muted text-foreground' : 'bg-jungle-green-600 text-white'}`}>
+                        <p className="mb-0.5 text-[10px] opacity-70">{m.from_name ?? 'Chip'}</p>
+                        {m.text}
+                      </div>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </div>
         )}
       </section>
 

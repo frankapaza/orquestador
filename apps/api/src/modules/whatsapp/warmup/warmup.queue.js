@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq'
 import { redis } from '../../../lib/redis.js'
 import { sql } from '../../../lib/db.js'
 import { baileysManager } from '../baileys.manager.js'
+import { recordWarmupMessage } from './warmup.service.js'
 
 const QUEUE_NAME = 'warmup-jobs'
 
@@ -27,7 +28,7 @@ export function startWarmupWorker() {
 
       // Verificar que el chip siga habilitado, conectado y no baneado.
       const [acc] = await sql`
-        SELECT id, warmup_enabled, banned_at, is_active
+        SELECT id, client_id, warmup_enabled, banned_at, is_active
         FROM whatsapp_accounts WHERE id = ${fromAccountId}
       `
       if (!acc || !acc.warmup_enabled || acc.banned_at || !acc.is_active) {
@@ -40,6 +41,18 @@ export function startWarmupWorker() {
       // Nota: el conteo diario (warmup_sent) se registra al ENCOLAR en el
       // scheduler, no aquí, para evitar sobre-encolar entre ticks.
       await baileysManager.sendWarmup(fromInstance, { to: toPhone, text, simulateTyping, markRead })
+
+      // Registrar el mensaje para el visor de chat (con los datos del par que trae el job).
+      await recordWarmupMessage({
+        clientId:      acc.client_id,
+        threadKey:     job.data.threadKey,
+        fromAccountId: fromAccountId,
+        toAccountId:   job.data.toAccountId,
+        peerPhone:     job.data.peerPhone,
+        peerName:      job.data.peerName,
+        peerKind:      job.data.peerKind,
+        text,
+      }).catch(e => console.error('[Warmup] recordWarmupMessage:', e.message))
 
       return { sent: true }
     },

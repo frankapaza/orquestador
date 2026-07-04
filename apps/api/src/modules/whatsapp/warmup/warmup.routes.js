@@ -63,6 +63,7 @@ export async function warmupRoutes(fastify) {
       ai_model:    cfg.ai_model ?? '',
       ai_base_url: cfg.ai_base_url ?? '',
       has_ai_key:  !!cfg.ai_api_key_enc,
+      ai_auto_weekly: !!cfg.ai_auto_weekly,
       presets:     AI_PRESETS,
       model_hints: AI_MODEL_HINTS,
     }
@@ -75,23 +76,25 @@ export async function warmupRoutes(fastify) {
       ai_model:    z.string().max(80).optional().nullable(),
       ai_base_url: z.string().max(200).optional().nullable(),
       api_key:     z.string().min(10).optional(),  // solo si se cambia
+      ai_auto_weekly: z.boolean().optional(),
     }).parse(req.body)
 
     // Garantizar que exista la fila de config.
     await upsertWarmupConfig(req.user.sub, {})
 
-    const keyUpdate = body.api_key ? sql`, ai_api_key_enc = ${encrypt(body.api_key)}` : sql``
+    const keyUpdate  = body.api_key ? sql`, ai_api_key_enc = ${encrypt(body.api_key)}` : sql``
+    const autoUpdate = body.ai_auto_weekly === undefined ? sql`` : sql`, ai_auto_weekly = ${body.ai_auto_weekly}`
     await sql`
       UPDATE warmup_config
       SET ai_provider = ${body.ai_provider},
           ai_model    = ${body.ai_model ?? null},
           ai_base_url = ${body.ai_base_url ?? null}
-          ${keyUpdate},
+          ${keyUpdate}${autoUpdate},
           updated_at  = now()
       WHERE client_id = ${req.user.sub}
     `
     const cfg = await getWarmupConfig(req.user.sub)
-    return { ai_provider: cfg.ai_provider, ai_model: cfg.ai_model, ai_base_url: cfg.ai_base_url, has_ai_key: !!cfg.ai_api_key_enc }
+    return { ai_provider: cfg.ai_provider, ai_model: cfg.ai_model, ai_base_url: cfg.ai_base_url, has_ai_key: !!cfg.ai_api_key_enc, ai_auto_weekly: !!cfg.ai_auto_weekly }
   })
 
   fastify.post('/whatsapp/warmup/ai/test', { onRequest: pre }, async (req, reply) => {
@@ -211,6 +214,73 @@ export async function warmupRoutes(fastify) {
     if (!adminOnly(req, reply)) return
     await sql`
       DELETE FROM warmup_conversations
+      WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    return { ok: true }
+  })
+
+  // ── Visor de chat ─────────────────────────────────────────────────────────
+  fastify.get('/whatsapp/warmup/chats', { onRequest: pre }, async (req) => {
+    const rows = await sql`
+      SELECT thread_key,
+             max(created_at)                                    AS last_at,
+             count(*)::int                                      AS msg_count,
+             (array_agg(text      ORDER BY created_at DESC))[1] AS last_text,
+             (array_agg(peer_kind ORDER BY created_at DESC))[1] AS peer_kind
+      FROM warmup_messages
+      WHERE client_id = ${req.user.sub}
+      GROUP BY thread_key
+      ORDER BY last_at DESC
+      LIMIT 100
+    `
+    // Mapa teléfono(digits) → nombre de chip, para etiquetar los hilos.
+    const chips = await sql`
+      SELECT name, phone_number FROM whatsapp_accounts
+      WHERE client_id = ${req.user.sub} AND phone_number IS NOT NULL
+    `
+    const nameByPhone = new Map(chips.map(c => [c.phone_number.replace(/\D/g, ''), c.name]))
+    const labelFor = (digitsPhone) => nameByPhone.get(digitsPhone) ?? ('Externo +' + digitsPhone)
+
+    return rows.map(r => {
+      const [p1, p2] = r.thread_key.split('|')
+      return {
+        thread_key: r.thread_key,
+        title:      `${labelFor(p1)} ↔ ${labelFor(p2)}`,
+        last_text:  r.last_text,
+        last_at:    r.last_at,
+        msg_count:  r.msg_count,
+        peer_kind:  r.peer_kind,
+      }
+    })
+  })
+
+  fastify.get('/whatsapp/warmup/chat', { onRequest: pre }, async (req) => {
+    const { thread } = z.object({ thread: z.string().min(1) }).parse(req.query)
+    return sql`
+      SELECT m.id, m.from_account_id, wa.name AS from_name, m.peer_kind, m.text, m.created_at
+      FROM warmup_messages m
+      LEFT JOIN whatsapp_accounts wa ON wa.id = m.from_account_id
+      WHERE m.client_id = ${req.user.sub} AND m.thread_key = ${thread}
+      ORDER BY m.created_at ASC
+      LIMIT 500
+    `
+  })
+
+  // ── Alertas ───────────────────────────────────────────────────────────────
+  fastify.get('/whatsapp/warmup/alerts', { onRequest: pre }, async (req) => {
+    return sql`
+      SELECT al.id, al.account_id, al.level, al.reason, al.created_at, wa.name AS account_name
+      FROM warmup_alerts al
+      LEFT JOIN whatsapp_accounts wa ON wa.id = al.account_id
+      WHERE al.client_id = ${req.user.sub} AND al.acknowledged = false
+      ORDER BY al.created_at DESC
+    `
+  })
+
+  fastify.post('/whatsapp/warmup/alerts/:id/ack', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    await sql`
+      UPDATE warmup_alerts SET acknowledged = true
       WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
     `
     return { ok: true }

@@ -4,7 +4,7 @@ import { enqueueWarmupTurn } from './warmup.queue.js'
 import { varyText } from './catalog.seed.js'
 import {
   getWarmupConfig, effectiveConfig, isActiveNow, rampTargetForDay,
-  sentTodayFor, getActiveConversations, randomDelayMs, recordWarmupSent,
+  sentTodayFor, getActiveConversations, randomDelayMs, recordWarmupSent, threadKeyFor,
 } from './warmup.service.js'
 
 const digits = p => (p ?? '').replace(/\D/g, '')
@@ -69,6 +69,12 @@ async function playInternal(a, b, conv, cfg, budget) {
       text:           varyText(turn.text),
       simulateTyping: cfg.simulate_typing !== false,
       markRead:       cfg.mark_read !== false,
+      // Datos para el visor de chat:
+      peerPhone:      digits(receiver.chip.phone_number),
+      peerName:       receiver.chip.name,
+      toAccountId:    receiver.chip.id,
+      peerKind:       'internal',
+      threadKey:      threadKeyFor(sender.chip.phone_number, receiver.chip.phone_number),
     }, delay)
 
     // Contar al encolar (no al enviar) para no sobre-encolar entre ticks.
@@ -92,6 +98,12 @@ async function playExternal(a, phone, conv, cfg, budget) {
       text:           varyText(turn.text),
       simulateTyping: cfg.simulate_typing !== false,
       markRead:       cfg.mark_read !== false,
+      // Datos para el visor de chat:
+      peerPhone:      digits(phone),
+      peerName:       null,
+      toAccountId:    null,
+      peerKind:       'external',
+      threadKey:      threadKeyFor(a.chip.phone_number, phone),
     }, delay)
 
     await recordWarmupSent(a.chip.id)

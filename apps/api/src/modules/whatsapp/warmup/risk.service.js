@@ -1,4 +1,5 @@
 import { sql } from '../../../lib/db.js'
+import { createAlert } from './alerts.service.js'
 
 // Score de riesgo de baneo (heurístico, 0-100). No es una certeza: es una
 // estimación por señales indirectas para pausar ANTES de llegar al ban.
@@ -83,6 +84,11 @@ export async function recomputeRisk(clientId = null) {
           ${pause ? sql`, warmup_enabled = false` : sql``}
       WHERE id = ${a.id}
     `
+    // Alerta solo cuando ENTRA a rojo (antes no era rojo).
+    if (level === 'red' && a.risk_level !== 'red') {
+      await createAlert(a.client_id, a.id, 'red', reasons.join('; ') || 'Riesgo alto de baneo')
+        .catch(e => console.error('[Warmup] createAlert red:', e.message))
+    }
     results.push({ id: a.id, score, level, reasons, paused: pause })
   }
 

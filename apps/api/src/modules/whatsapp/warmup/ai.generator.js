@@ -112,3 +112,19 @@ export async function generateCatalog(clientId, count = 20) {
 
   return { generated: rows.length, provider: settings.provider, model: settings.model }
 }
+
+// Desactiva las conversaciones IA más antiguas dejando solo las `keep` más recientes
+// activas (el catálogo base source='manual' no se toca). Devuelve cuántas desactivó.
+export async function pruneAiCatalog(clientId, keep = 60) {
+  const res = await sql`
+    UPDATE warmup_conversations SET is_active = false
+    WHERE client_id = ${clientId} AND source = 'ai' AND is_active = true
+      AND id NOT IN (
+        SELECT id FROM warmup_conversations
+        WHERE client_id = ${clientId} AND source = 'ai' AND is_active = true
+        ORDER BY created_at DESC
+        LIMIT ${keep}
+      )
+  `
+  return res.count
+}

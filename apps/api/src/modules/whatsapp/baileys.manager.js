@@ -16,6 +16,7 @@ import { sql } from '../../lib/db.js'
 import { processIncoming, updateMessageStatus } from '../channels/message.service.js'
 import { bus } from '../../lib/eventBus.js'
 import { internalAccountsByPhone, recordWarmupReceived } from './warmup/warmup.service.js'
+import { createAlert } from './warmup/alerts.service.js'
 
 const __dirname  = dirname(fileURLToPath(import.meta.url))
 const SESSIONS_DIR = join(__dirname, '..', '..', '..', 'sessions')
@@ -226,6 +227,9 @@ class BaileysManager {
           } catch (e) {
             console.error(`[Baileys][${name}] Error marcando baneo:`, e.message)
           }
+          // Alerta in-app de baneo (necesitamos el client_id del chip).
+          const [acc] = await sql`SELECT id, client_id FROM whatsapp_accounts WHERE instance_name = ${name}`
+          if (acc) await createAlert(acc.client_id, acc.id, 'banned', reason).catch(() => {})
         }
 
         if (loggedOut) {

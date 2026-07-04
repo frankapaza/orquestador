@@ -146,3 +146,21 @@ export function randomDelayMs(cfg) {
   const max = Math.max(min + 1, cfg.delay_max_sec ?? 300)
   return Math.floor(Math.random() * (max - min) + min) * 1000
 }
+
+// Clave de hilo del chat: par de teléfonos ordenado, para agrupar A↔B sin importar dirección.
+export function threadKeyFor(phoneA, phoneB) {
+  const a = (phoneA ?? '').replace(/\D/g, '')
+  const b = (phoneB ?? '').replace(/\D/g, '')
+  return [a, b].sort().join('|')
+}
+
+// Registra un mensaje saliente del warmup para el visor de chat.
+export async function recordWarmupMessage({ clientId, threadKey, fromAccountId, toAccountId, peerPhone, peerName, peerKind, text }) {
+  await sql`
+    INSERT INTO warmup_messages
+      (client_id, thread_key, from_account_id, to_account_id, peer_phone, peer_name, peer_kind, text)
+    VALUES
+      (${clientId}, ${threadKey}, ${fromAccountId}, ${toAccountId ?? null},
+       ${peerPhone ?? null}, ${peerName ?? null}, ${peerKind ?? 'internal'}, ${text ?? null})
+  `
+}

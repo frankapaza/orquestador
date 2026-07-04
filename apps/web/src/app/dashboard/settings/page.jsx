@@ -383,7 +383,7 @@ function AiAgentTab() {
       const model = ai.ai_provider === 'custom'
         ? (ai.ai_model || null)
         : (known.includes(ai.ai_model) ? ai.ai_model : null)
-      const payload = { ai_provider: ai.ai_provider, ai_model: model, ai_base_url: ai.ai_base_url || null }
+      const payload = { ai_provider: ai.ai_provider, ai_model: model, ai_base_url: ai.ai_base_url || null, ai_auto_weekly: !!ai.ai_auto_weekly }
       if (apiKey.trim()) payload.api_key = apiKey.trim()
       const { data } = await api.put('/whatsapp/warmup/ai', payload)
       setAi(a => ({ ...a, ...data })); setApiKey('')
@@ -440,6 +440,12 @@ function AiAgentTab() {
           <Field label={<span>API key {ai.has_ai_key && <span className="font-normal text-muted-foreground">— guardada; deja vacío para conservarla</span>}</span>}>
             <Input className={INPUT_CLASS} type="password" value={apiKey} placeholder={ai.has_ai_key ? '••••••••••••' : 'sk-...'} onChange={e => setApiKey(e.target.value)} />
           </Field>
+
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input type="checkbox" className="h-4 w-4 accent-jungle-green-600"
+              checked={!!ai.ai_auto_weekly} onChange={e => setField('ai_auto_weekly', e.target.checked)} />
+            Regenerar diálogos con IA cada semana (domingos)
+          </label>
 
           <Notice type={msg?.type} msg={msg?.text} />
 
