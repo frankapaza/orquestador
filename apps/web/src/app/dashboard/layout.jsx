@@ -55,6 +55,7 @@ const MENU_SECTIONS = [
     adminOnly: true,
     items: [
       { href: '/dashboard/whatsapp-accounts',     label: 'WhatsApp',      icon: '💚' },
+      { href: '/dashboard/warmup',                label: 'Calentamiento', icon: '🔥' },
       { href: '/dashboard/sms-accounts',          label: 'SMS',           icon: '📲' },
       { href: '/dashboard/webhook-subscriptions', label: 'Webhooks',      icon: '🔗' },
       { href: '/dashboard/settings',              label: 'Configuración', icon: '⚙️' },

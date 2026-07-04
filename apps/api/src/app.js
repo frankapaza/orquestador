@@ -31,6 +31,10 @@ import eventsRoutes        from './modules/events/events.routes.js'
 import { startCampaignWorker, enqueueCampaign } from './workers/campaign.queue.js'
 import { baileysManager } from './modules/whatsapp/baileys.manager.js'
 import { imapManager } from './modules/email/imap.manager.js'
+import { warmupRoutes } from './modules/whatsapp/warmup/warmup.routes.js'
+import { startWarmupWorker } from './modules/whatsapp/warmup/warmup.queue.js'
+import { runWarmupTick } from './modules/whatsapp/warmup/warmup.scheduler.js'
+import { recomputeRisk } from './modules/whatsapp/warmup/risk.service.js'
 import { sql } from './lib/db.js'
 
 const fastify = Fastify({
@@ -65,6 +69,7 @@ fastify.register(integrationsRoutes, { prefix: API_PREFIX })
 fastify.register(adminRoutes,        { prefix: API_PREFIX })
 fastify.register(settingsRoutes,     { prefix: API_PREFIX })
 fastify.register(whatsappRoutes,     { prefix: API_PREFIX })
+fastify.register(warmupRoutes,       { prefix: API_PREFIX })
 fastify.register(smsRoutes,          { prefix: API_PREFIX })
 fastify.register(conversationsRoutes, { prefix: API_PREFIX })
 fastify.register(webhookSubscriptionsRoutes, { prefix: API_PREFIX })
@@ -92,6 +97,10 @@ if (WORKERS_DISABLED) {
   startCampaignWorker()
   fastify.log.info('[Worker] Campaign worker iniciado')
 
+  // Iniciar worker de calentamiento (warmup) de chips WhatsApp
+  startWarmupWorker()
+  fastify.log.info('[Worker] Warmup worker iniciado')
+
   // Iniciar sesiones Baileys guardadas (con delay para que la DB esté lista)
   setTimeout(() => {
     baileysManager.initAll().catch(err => fastify.log.error({ err }, '[Baileys] Error al inicializar sesiones'))
@@ -115,6 +124,26 @@ if (WORKERS_DISABLED) {
       }
     } catch (err) {
       fastify.log.error({ err }, '[Cron] Error al verificar campanas programadas')
+    }
+  })
+
+  // Calentamiento: planificar y encolar conversaciones cada 10 minutos.
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      await runWarmupTick()
+    } catch (err) {
+      fastify.log.error({ err }, '[Cron] Error en tick de warmup')
+    }
+  })
+
+  // Recalcular riesgo de baneo de los chips cada 30 minutos.
+  cron.schedule('*/30 * * * *', async () => {
+    try {
+      const r = await recomputeRisk()
+      const reds = r.filter(x => x.level === 'red').length
+      if (reds) fastify.log.warn(`[Cron] Riesgo recalculado: ${reds} chip(s) en ROJO`)
+    } catch (err) {
+      fastify.log.error({ err }, '[Cron] Error al recalcular riesgo')
     }
   })
 

@@ -25,6 +25,8 @@ export async function pickWhatsappAccount(clientId) {
       AND is_active = true
       AND is_connected = true
       AND sent_today < daily_limit
+      AND banned_at IS NULL
+      AND COALESCE(risk_level, 'green') <> 'red'
     ORDER BY (sent_today::float / daily_limit) ASC
   `
   return accounts.find(isWithinActiveHours) ?? null

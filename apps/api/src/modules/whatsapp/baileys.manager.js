@@ -15,6 +15,7 @@ import pino from 'pino'
 import { sql } from '../../lib/db.js'
 import { processIncoming, updateMessageStatus } from '../channels/message.service.js'
 import { bus } from '../../lib/eventBus.js'
+import { internalAccountsByPhone, recordWarmupReceived } from './warmup/warmup.service.js'
 
 const __dirname  = dirname(fileURLToPath(import.meta.url))
 const SESSIONS_DIR = join(__dirname, '..', '..', '..', 'sessions')
@@ -204,6 +205,29 @@ class BaileysManager {
         s.status = 'disconnected'
         await sql`UPDATE whatsapp_accounts SET is_connected = false WHERE instance_name = ${name}`
 
+        // ── Detección reactiva de baneo ──────────────────────────────────────
+        // 403 (forbidden) = número bloqueado por WhatsApp. 401 loggedOut también
+        // puede ser un ban (además de logout manual). En ambos casos pausamos el
+        // warmup del chip y lo marcamos en rojo para alertar.
+        if (code === 403 || code === 401 || loggedOut) {
+          const reason = code === 403 ? 'WhatsApp devolvió 403 (número bloqueado)'
+                       : 'Sesión cerrada (401/loggedOut) — posible baneo o logout manual'
+          try {
+            await sql`
+              UPDATE whatsapp_accounts
+              SET banned_at    = COALESCE(banned_at, now()),
+                  ban_reason   = ${reason},
+                  risk_level   = 'red',
+                  risk_score   = 100,
+                  warmup_enabled = false
+              WHERE instance_name = ${name}
+            `
+            console.warn(`[Baileys][${name}] ⚠️ Posible BANEO (código ${code}). Warmup pausado.`)
+          } catch (e) {
+            console.error(`[Baileys][${name}] Error marcando baneo:`, e.message)
+          }
+        }
+
         if (loggedOut) {
           this.sessions.delete(name)
           // Borrar credenciales: la sesión fue revocada desde el teléfono
@@ -224,12 +248,24 @@ class BaileysManager {
       const [acc] = await sql`SELECT * FROM whatsapp_accounts WHERE instance_name = ${name}`
       if (!acc) return
 
+      // Mapa de chips internos del cliente: si el mensaje viene de otro chip del
+      // sistema es tráfico de warmup → NO va al inbox, solo se cuenta.
+      const internal = await internalAccountsByPhone(acc.client_id).catch(() => new Map())
+      const onlyDigits = p => (p ?? '').replace(/\D/g, '')
+
       for (const m of messages) {
         if (m.key.fromMe || isJidBroadcast(m.key.remoteJid ?? '')) continue
 
         // Resolver número real (maneja @s.whatsapp.net y @lid)
         const contactPhone = this.resolvePhone(m.key.remoteJid, name)
         if (!contactPhone) continue
+
+        // Tráfico de calentamiento entre chips internos: contar y saltar el inbox.
+        const fromInternal = internal.get(onlyDigits(contactPhone))
+        if (fromInternal && fromInternal.instance_name !== name) {
+          await recordWarmupReceived(acc.id).catch(() => {})
+          continue
+        }
 
         const body = m.message?.conversation
                   ?? m.message?.extendedTextMessage?.text
@@ -381,6 +417,35 @@ class BaileysManager {
     }
 
     const sent = await s.socket.sendMessage(jid, { text: body })
+    return { id: sent?.key?.id }
+  }
+
+  // Envío de calentamiento: humaniza con "escribiendo…" y marca leídos.
+  // No incrementa sent_today (ese contador es para campañas reales).
+  async sendWarmup(name, { to, text, simulateTyping = true, markRead = true }) {
+    const s = this.sessions.get(name)
+    if (!s?.socket) throw new Error('Sesión no activa')
+    if (s.status !== 'connected') throw new Error('WhatsApp no conectado')
+
+    const jid  = this.toJid(to)
+    const sock = s.socket
+
+    try {
+      if (markRead) {
+        // Marcar como en línea antes de "leer"
+        await sock.sendPresenceUpdate('available').catch(() => {})
+      }
+      if (simulateTyping) {
+        await sock.presenceSubscribe(jid).catch(() => {})
+        await sock.sendPresenceUpdate('composing', jid).catch(() => {})
+        // Tiempo de escritura proporcional a la longitud (0.8s–4.5s)
+        const typingMs = Math.min(4500, Math.max(800, text.length * 90))
+        await new Promise(r => setTimeout(r, typingMs))
+        await sock.sendPresenceUpdate('paused', jid).catch(() => {})
+      }
+    } catch {}
+
+    const sent = await sock.sendMessage(jid, { text })
     return { id: sent?.key?.id }
   }
 
