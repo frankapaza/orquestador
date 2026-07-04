@@ -188,10 +188,14 @@ class BaileysManager {
         s.qrBase64    = null
         s.pairingCode = null
         const phone = sock.user?.id?.split(':')[0] ?? null
+        // Al conectar con éxito, limpiar cualquier marca previa de baneo/riesgo:
+        // si el chip volvió a vincularse es que NO estaba realmente baneado.
         await sql`
           UPDATE whatsapp_accounts
           SET is_connected = true,
-              phone_number = COALESCE(phone_number, ${phone ? '+' + phone : null})
+              phone_number = COALESCE(phone_number, ${phone ? '+' + phone : null}),
+              banned_at = null, ban_reason = null,
+              risk_level = 'green', risk_score = 0
           WHERE instance_name = ${name}
         `
       }
@@ -206,30 +210,39 @@ class BaileysManager {
         s.status = 'disconnected'
         await sql`UPDATE whatsapp_accounts SET is_connected = false WHERE instance_name = ${name}`
 
-        // ── Detección reactiva de baneo ──────────────────────────────────────
-        // 403 (forbidden) = número bloqueado por WhatsApp. 401 loggedOut también
-        // puede ser un ban (además de logout manual). En ambos casos pausamos el
-        // warmup del chip y lo marcamos en rojo para alertar.
-        if (code === 403 || code === 401 || loggedOut) {
-          const reason = code === 403 ? 'WhatsApp devolvió 403 (número bloqueado)'
-                       : 'Sesión cerrada (401/loggedOut) — posible baneo o logout manual'
+        // ── Detección reactiva ───────────────────────────────────────────────
+        // 403 = número bloqueado por WhatsApp → BANEO real (marca banned_at, rojo).
+        // 401/loggedOut = sesión cerrada/desvinculada → NO es baneo necesariamente;
+        //   se pausa el warmup y se pide re-vincular, pero sin marcar baneo.
+        if (code === 403) {
+          const reason = 'WhatsApp devolvió 403 — número bloqueado (baneo)'
           try {
             await sql`
               UPDATE whatsapp_accounts
-              SET banned_at    = COALESCE(banned_at, now()),
-                  ban_reason   = ${reason},
-                  risk_level   = 'red',
-                  risk_score   = 100,
-                  warmup_enabled = false
+              SET banned_at = COALESCE(banned_at, now()), ban_reason = ${reason},
+                  risk_level = 'red', risk_score = 100, warmup_enabled = false
               WHERE instance_name = ${name}
             `
-            console.warn(`[Baileys][${name}] ⚠️ Posible BANEO (código ${code}). Warmup pausado.`)
+            console.warn(`[Baileys][${name}] ⚠️ BANEO (403). Warmup pausado.`)
           } catch (e) {
             console.error(`[Baileys][${name}] Error marcando baneo:`, e.message)
           }
-          // Alerta in-app de baneo (necesitamos el client_id del chip).
           const [acc] = await sql`SELECT id, client_id FROM whatsapp_accounts WHERE instance_name = ${name}`
           if (acc) await createAlert(acc.client_id, acc.id, 'banned', reason).catch(() => {})
+        } else if (code === 401 || loggedOut) {
+          const reason = 'Sesión cerrada — vuelve a vincular (escanea el QR). Si el número ya no funciona en WhatsApp, podría ser baneo.'
+          try {
+            await sql`
+              UPDATE whatsapp_accounts
+              SET risk_level = 'yellow', warmup_enabled = false
+              WHERE instance_name = ${name}
+            `
+            console.warn(`[Baileys][${name}] ℹ️ Sesión cerrada (401/logout). Warmup pausado; re-vincular.`)
+          } catch (e) {
+            console.error(`[Baileys][${name}] Error marcando sesión cerrada:`, e.message)
+          }
+          const [acc] = await sql`SELECT id, client_id FROM whatsapp_accounts WHERE instance_name = ${name}`
+          if (acc) await createAlert(acc.client_id, acc.id, 'logout', reason).catch(() => {})
         }
 
         if (loggedOut) {

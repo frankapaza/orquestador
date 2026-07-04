@@ -17,6 +17,18 @@ const card = 'rounded-2xl border bg-card shadow-sm'
 const label = 'text-xs font-semibold text-foreground'
 const input = 'mt-1 w-full rounded-xl border border-transparent bg-muted/60 px-3 py-2 text-sm transition-colors focus:border-ring focus:bg-background focus:outline-none'
 
+// Hora peruana (America/Lima) para las marcas de tiempo del chat.
+function fmtTime(iso) {
+  if (!iso) return ''
+  try { return new Date(iso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' }) }
+  catch { return '' }
+}
+function fmtWhen(iso) {
+  if (!iso) return ''
+  try { return new Date(iso).toLocaleString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+  catch { return '' }
+}
+
 export default function WarmupPage() {
   const [cfg, setCfg]         = useState(null)
   const [chips, setChips]     = useState([])
@@ -235,7 +247,9 @@ export default function WarmupPage() {
               <li key={a.id} className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">
-                    {a.account_name} · <span className="text-red-600">{a.level === 'banned' ? 'Baneado' : 'Riesgo alto'}</span>
+                    {a.account_name} · <span className={a.level === 'logout' ? 'text-amber-600' : 'text-red-600'}>
+                      {a.level === 'banned' ? 'Baneado' : a.level === 'logout' ? 'Sesión cerrada' : 'Riesgo alto'}
+                    </span>
                   </p>
                   <p className="truncate text-xs text-muted-foreground">{a.reason}</p>
                 </div>
@@ -428,9 +442,17 @@ export default function WarmupPage() {
 
       {/* Conversaciones (chat) */}
       <section className={card}>
-        <div className="border-b p-5">
-          <h2 className="text-sm font-semibold text-foreground">💬 Conversaciones</h2>
-          <p className="text-xs text-muted-foreground">Lo que se están diciendo los chips (se actualiza solo · historial de 7 días).</p>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b p-5">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">💬 Conversaciones</h2>
+            <p className="text-xs text-muted-foreground">Lo que se están diciendo los chips (se actualiza solo · historial de 7 días).</p>
+          </div>
+          {chats.length > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+              Última actividad: {fmtWhen(chats[0].last_at)}
+            </span>
+          )}
         </div>
         {chats.length === 0 ? (
           <div className="p-8 text-center text-sm text-muted-foreground">Aún no hay mensajes de calentamiento.</div>
@@ -442,7 +464,10 @@ export default function WarmupPage() {
                 <li key={t.thread_key}>
                   <button onClick={() => setActiveThread(t.thread_key)}
                     className={`w-full px-4 py-3 text-left transition-colors hover:bg-muted/50 ${activeThread === t.thread_key ? 'bg-muted/60' : ''}`}>
-                    <p className="truncate text-sm font-medium text-foreground">{t.title}</p>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="truncate text-sm font-medium text-foreground">{t.title}</p>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">{fmtTime(t.last_at)}</span>
+                    </div>
                     <p className="truncate text-xs text-muted-foreground">{t.last_text}</p>
                   </button>
                 </li>
@@ -464,6 +489,7 @@ export default function WarmupPage() {
                       <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${mine ? 'bg-muted text-foreground' : 'bg-jungle-green-600 text-white'}`}>
                         <p className="mb-0.5 text-[10px] opacity-70">{m.from_name ?? 'Chip'}</p>
                         {m.text}
+                        <p className={`mt-0.5 text-right text-[10px] ${mine ? 'text-muted-foreground' : 'text-white/70'}`}>{fmtTime(m.created_at)}</p>
                       </div>
                     </div>
                   )
