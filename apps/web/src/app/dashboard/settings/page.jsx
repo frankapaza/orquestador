@@ -10,14 +10,15 @@ import { Label } from '@/components/ui/label'
 import { Modal } from '@/components/ui/modal'
 import {
   Settings, User, Users, Pencil, Eye, UserPlus, Save, Plus, Copy, Lock,
-  Check, X, Key, AlertCircle, CheckCircle, Star, Loader2, Trash2,
+  Check, X, Key, AlertCircle, CheckCircle, Star, Loader2, Trash2, Zap,
 } from '../../../components/ui/icons'
 import { cn } from '@/lib/utils'
 
 const TABS = [
-  { label: 'Perfil',   Icon: User },
-  { label: 'Equipo',   Icon: Users },
-  { label: 'API Keys', Icon: Key },
+  { label: 'Perfil',    Icon: User },
+  { label: 'Equipo',    Icon: Users },
+  { label: 'API Keys',  Icon: Key },
+  { label: 'Agente IA', Icon: Zap },
 ]
 const INPUT_CLASS = 'h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0'
 
@@ -357,7 +358,92 @@ function ApiKeysTab() {
   )
 }
 
-const TAB_DESC = ['Tu cuenta y contraseña', 'Miembros y roles', 'Acceso programático']
+// ── Agente IA ─────────────────────────────────────────────────────────────────
+function AiAgentTab() {
+  const [ai, setAi]     = useState(null)
+  const [apiKey, setApiKey] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg]   = useState(null)
+
+  async function load() {
+    try { const { data } = await api.get('/whatsapp/warmup/ai'); setAi(data) }
+    catch { setMsg({ type: 'err', text: 'No se pudo cargar la configuración de IA' }) }
+  }
+  useEffect(() => { load() }, [])
+
+  function setField(k, v) { setAi(p => ({ ...p, [k]: v })) }
+  function flash(type, text) { setMsg({ type, text }); setTimeout(() => setMsg(null), 3500) }
+
+  async function save(e) {
+    e.preventDefault(); setBusy(true); setMsg(null)
+    try {
+      const payload = { ai_provider: ai.ai_provider, ai_model: ai.ai_model || null, ai_base_url: ai.ai_base_url || null }
+      if (apiKey.trim()) payload.api_key = apiKey.trim()
+      const { data } = await api.put('/whatsapp/warmup/ai', payload)
+      setAi(a => ({ ...a, ...data })); setApiKey('')
+      flash('ok', 'Agente IA guardado')
+    } catch (err) { flash('err', err.response?.data?.error ?? 'Error al guardar') }
+    finally { setBusy(false) }
+  }
+
+  async function test() {
+    setBusy(true); setMsg(null)
+    try { const { data } = await api.post('/whatsapp/warmup/ai/test'); flash('ok', `Conexión OK (${data.model})`) }
+    catch (err) { flash('err', err.response?.data?.error ?? 'Falló la prueba de conexión') }
+    finally { setBusy(false) }
+  }
+
+  if (!ai) return <div className="text-sm text-muted-foreground">Cargando…</div>
+  const providerModel = ai.presets?.[ai.ai_provider]?.model ?? 'auto'
+
+  return (
+    <div className="space-y-4">
+      <SectionCard title="Agente IA" description="Proveedor para generar automáticamente los diálogos del calentamiento de WhatsApp. ChatGPT y DeepSeek son compatibles.">
+        <form onSubmit={save} className="space-y-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Proveedor">
+              <select className={`${INPUT_CLASS} w-full px-3`} value={ai.ai_provider ?? 'openai'} onChange={e => setField('ai_provider', e.target.value)}>
+                <option value="openai">ChatGPT (OpenAI)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="custom">Personalizado (compatible OpenAI)</option>
+              </select>
+            </Field>
+            <Field label="Modelo">
+              <Input className={INPUT_CLASS} value={ai.ai_model ?? ''} placeholder={providerModel} onChange={e => setField('ai_model', e.target.value)} />
+            </Field>
+          </div>
+
+          {ai.ai_provider === 'custom' && (
+            <Field label="URL base (endpoint compatible con OpenAI)">
+              <Input className={INPUT_CLASS} value={ai.ai_base_url ?? ''} placeholder="https://api.tuproveedor.com/v1" onChange={e => setField('ai_base_url', e.target.value)} />
+            </Field>
+          )}
+
+          <Field label={<span>API key {ai.has_ai_key && <span className="font-normal text-muted-foreground">— guardada; deja vacío para conservarla</span>}</span>}>
+            <Input className={INPUT_CLASS} type="password" value={apiKey} placeholder={ai.has_ai_key ? '••••••••••••' : 'sk-...'} onChange={e => setApiKey(e.target.value)} />
+          </Field>
+
+          <Notice type={msg?.type} msg={msg?.text} />
+
+          <div className="flex flex-wrap gap-3">
+            <Button type="submit" disabled={busy}>{busy ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Save size={16} /> Guardar</>}</Button>
+            <Button type="button" variant="outline" onClick={test} disabled={busy || !ai.has_ai_key}><Zap size={16} /> Probar conexión</Button>
+          </div>
+        </form>
+      </SectionCard>
+
+      <SectionCard title="¿Cómo funciona?" description="La IA genera una vez un catálogo de conversaciones que el calentamiento reproduce y remezcla — sin costo por mensaje.">
+        <ul className="space-y-2 text-sm text-muted-foreground">
+          <li className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-jungle-green-600" /> Configura aquí tu proveedor y API key (OpenAI o DeepSeek).</li>
+          <li className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-jungle-green-600" /> Ve a <b className="text-foreground">Calentamiento</b> y usa <b className="text-foreground">“Generar diálogos”</b> para crear las conversaciones.</li>
+          <li className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-jungle-green-600" /> Sin API key igual funciona con el catálogo base incluido.</li>
+        </ul>
+      </SectionCard>
+    </div>
+  )
+}
+
+const TAB_DESC = ['Tu cuenta y contraseña', 'Miembros y roles', 'Acceso programático', 'Generación de diálogos con IA']
 
 export default function SettingsPage() {
   const [tab, setTab] = useState(0)
@@ -395,6 +481,7 @@ export default function SettingsPage() {
           {tab === 0 && <ProfileTab user={user} onUpdated={loadUser} />}
           {tab === 1 && <TeamTab />}
           {tab === 2 && <ApiKeysTab />}
+          {tab === 3 && <AiAgentTab />}
         </div>
       </div>
     </div>
