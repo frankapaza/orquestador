@@ -1,9 +1,17 @@
 import { z } from 'zod'
 import { sql } from '../../../lib/db.js'
+import { encrypt } from '../../../lib/crypto.js'
 import { baileysManager } from '../baileys.manager.js'
 import { getWarmupConfig, upsertWarmupConfig } from './warmup.service.js'
 import { seedWarmupCatalog } from './catalog.seed.js'
 import { recomputeRisk } from './risk.service.js'
+import { generateCatalog, testAiConnection, AI_PRESETS } from './ai.generator.js'
+
+// Nunca exponer la key cifrada al frontend; solo si existe.
+function publicConfig(cfg) {
+  const { ai_api_key_enc, ...rest } = cfg
+  return { ...rest, has_ai_key: !!ai_api_key_enc }
+}
 
 const timeStr = z.string().regex(/^\d{2}:\d{2}$/)
 
@@ -33,7 +41,7 @@ export async function warmupRoutes(fastify) {
 
   // ── Configuración global ─────────────────────────────────────────────────
   fastify.get('/whatsapp/warmup/config', { onRequest: pre }, async (req) => {
-    return getWarmupConfig(req.user.sub)
+    return publicConfig(await getWarmupConfig(req.user.sub))
   })
 
   fastify.put('/whatsapp/warmup/config', { onRequest: pre }, async (req, reply) => {
@@ -44,7 +52,65 @@ export async function warmupRoutes(fastify) {
     }
     // Al habilitar el warmup por primera vez, sembrar el catálogo si está vacío.
     if (patch.is_enabled) await seedWarmupCatalog(req.user.sub).catch(() => {})
-    return upsertWarmupConfig(req.user.sub, patch)
+    return publicConfig(await upsertWarmupConfig(req.user.sub, patch))
+  })
+
+  // ── Agente IA (generación del catálogo) ───────────────────────────────────
+  fastify.get('/whatsapp/warmup/ai', { onRequest: pre }, async (req) => {
+    const cfg = await getWarmupConfig(req.user.sub)
+    return {
+      ai_provider: cfg.ai_provider ?? 'openai',
+      ai_model:    cfg.ai_model ?? '',
+      ai_base_url: cfg.ai_base_url ?? '',
+      has_ai_key:  !!cfg.ai_api_key_enc,
+      presets:     AI_PRESETS,
+    }
+  })
+
+  fastify.put('/whatsapp/warmup/ai', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    const body = z.object({
+      ai_provider: z.enum(['openai', 'deepseek', 'custom']),
+      ai_model:    z.string().max(80).optional().nullable(),
+      ai_base_url: z.string().max(200).optional().nullable(),
+      api_key:     z.string().min(10).optional(),  // solo si se cambia
+    }).parse(req.body)
+
+    // Garantizar que exista la fila de config.
+    await upsertWarmupConfig(req.user.sub, {})
+
+    const keyUpdate = body.api_key ? sql`, ai_api_key_enc = ${encrypt(body.api_key)}` : sql``
+    await sql`
+      UPDATE warmup_config
+      SET ai_provider = ${body.ai_provider},
+          ai_model    = ${body.ai_model ?? null},
+          ai_base_url = ${body.ai_base_url ?? null}
+          ${keyUpdate},
+          updated_at  = now()
+      WHERE client_id = ${req.user.sub}
+    `
+    const cfg = await getWarmupConfig(req.user.sub)
+    return { ai_provider: cfg.ai_provider, ai_model: cfg.ai_model, ai_base_url: cfg.ai_base_url, has_ai_key: !!cfg.ai_api_key_enc }
+  })
+
+  fastify.post('/whatsapp/warmup/ai/test', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    try {
+      const cfg = await getWarmupConfig(req.user.sub)
+      return await testAiConnection(cfg)
+    } catch (e) {
+      return reply.code(400).send({ error: e.message })
+    }
+  })
+
+  fastify.post('/whatsapp/warmup/catalog/generate', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    const { count } = z.object({ count: z.number().int().min(1).max(50).default(20) }).parse(req.body ?? {})
+    try {
+      return await generateCatalog(req.user.sub, count)
+    } catch (e) {
+      return reply.code(400).send({ error: e.message })
+    }
   })
 
   // ── Toggle / override por chip ────────────────────────────────────────────

@@ -21,6 +21,10 @@ export default function WarmupPage() {
   const [cfg, setCfg]         = useState(null)
   const [chips, setChips]     = useState([])
   const [catalog, setCatalog] = useState([])
+  const [ai, setAi]           = useState(null)
+  const [aiKey, setAiKey]     = useState('')
+  const [aiBusy, setAiBusy]   = useState(false)
+  const [genCount, setGenCount] = useState(20)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
   const [msg, setMsg]         = useState(null)
@@ -28,14 +32,16 @@ export default function WarmupPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [c, s, cat] = await Promise.all([
+      const [c, s, cat, aiRes] = await Promise.all([
         api.get('/whatsapp/warmup/config'),
         api.get('/whatsapp/warmup/status'),
         api.get('/whatsapp/warmup/catalog'),
+        api.get('/whatsapp/warmup/ai'),
       ])
       setCfg(c.data)
       setChips(s.data)
       setCatalog(cat.data)
+      setAi(aiRes.data)
     } catch (e) {
       setMsg({ type: 'error', text: 'No se pudo cargar la configuración' })
     } finally {
@@ -110,6 +116,43 @@ export default function WarmupPage() {
       await load()
       flash('ok', data.seeded ? `${data.seeded} conversaciones agregadas` : 'El catálogo ya tenía conversaciones')
     } catch { flash('error', 'Error al sembrar el catálogo') }
+  }
+
+  function setAiField(k, v) { setAi(p => ({ ...p, [k]: v })) }
+
+  async function saveAi() {
+    setAiBusy(true)
+    try {
+      const payload = { ai_provider: ai.ai_provider, ai_model: ai.ai_model || null, ai_base_url: ai.ai_base_url || null }
+      if (aiKey.trim()) payload.api_key = aiKey.trim()
+      const { data } = await api.put('/whatsapp/warmup/ai', payload)
+      setAi(a => ({ ...a, ...data }))
+      setAiKey('')
+      flash('ok', 'Agente IA guardado')
+    } catch (e) {
+      flash('error', e.response?.data?.error ?? 'Error al guardar el Agente IA')
+    } finally { setAiBusy(false) }
+  }
+
+  async function testAi() {
+    setAiBusy(true)
+    try {
+      const { data } = await api.post('/whatsapp/warmup/ai/test')
+      flash('ok', `Conexión OK (${data.model})`)
+    } catch (e) {
+      flash('error', e.response?.data?.error ?? 'Falló la prueba de conexión')
+    } finally { setAiBusy(false) }
+  }
+
+  async function generateAi() {
+    setAiBusy(true)
+    try {
+      const { data } = await api.post('/whatsapp/warmup/catalog/generate', { count: Number(genCount) })
+      await load()
+      flash('ok', `${data.generated} conversaciones generadas con ${data.provider}`)
+    } catch (e) {
+      flash('error', e.response?.data?.error ?? 'Error al generar con IA')
+    } finally { setAiBusy(false) }
   }
 
   if (loading) return <div className="p-6 text-sm text-muted-foreground">Cargando…</div>
@@ -307,12 +350,77 @@ export default function WarmupPage() {
         )}
       </section>
 
+      {/* Agente IA */}
+      {ai && (
+        <section className={card}>
+          <div className="border-b p-5">
+            <h2 className="text-sm font-semibold text-foreground">🤖 Agente IA</h2>
+            <p className="text-xs text-muted-foreground">
+              Genera automáticamente diálogos variados para toda la semana con ChatGPT o DeepSeek.
+              {ai.has_ai_key && <span className="ml-1 font-medium text-emerald-600">· API key configurada ✓</span>}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <span className={label}>Proveedor</span>
+              <select className={input} value={ai.ai_provider ?? 'openai'}
+                onChange={e => setAiField('ai_provider', e.target.value)}>
+                <option value="openai">ChatGPT (OpenAI)</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="custom">Personalizado</option>
+              </select>
+            </div>
+            <div>
+              <span className={label}>Modelo</span>
+              <input className={input} value={ai.ai_model ?? ''}
+                placeholder={ai.presets?.[ai.ai_provider]?.model ?? 'auto'}
+                onChange={e => setAiField('ai_model', e.target.value)} />
+            </div>
+            <div className="sm:col-span-2">
+              <span className={label}>API key {ai.has_ai_key && <span className="font-normal text-muted-foreground">(guardada — deja vacío para conservar)</span>}</span>
+              <input type="password" className={input} value={aiKey} placeholder="sk-..."
+                onChange={e => setAiKey(e.target.value)} />
+            </div>
+            {ai.ai_provider === 'custom' && (
+              <div className="sm:col-span-2 lg:col-span-4">
+                <span className={label}>URL base (compatible OpenAI)</span>
+                <input className={input} value={ai.ai_base_url ?? ''} placeholder="https://api.tuproveedor.com/v1"
+                  onChange={e => setAiField('ai_base_url', e.target.value)} />
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 border-t px-5 py-4">
+            <button onClick={saveAi} disabled={aiBusy}
+              className="rounded-xl bg-jungle-green-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-jungle-green-700 disabled:opacity-60">
+              Guardar
+            </button>
+            <button onClick={testAi} disabled={aiBusy || !ai.has_ai_key}
+              className="rounded-xl border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50">
+              Probar conexión
+            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <input type="number" min={1} max={50} value={genCount}
+                onChange={e => setGenCount(e.target.value)}
+                className="w-20 rounded-xl border border-transparent bg-muted/60 px-3 py-2 text-sm focus:border-ring focus:bg-background focus:outline-none" />
+              <button onClick={generateAi} disabled={aiBusy || !ai.has_ai_key}
+                className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-600 disabled:opacity-50">
+                {aiBusy ? 'Generando…' : 'Generar diálogos'}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Catálogo */}
       <section className={card}>
         <div className="flex items-center justify-between p-5">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Catálogo de conversaciones</h2>
-            <p className="text-xs text-muted-foreground">{catalog.length} conversación(es) disponibles para el calentamiento.</p>
+            <p className="text-xs text-muted-foreground">
+              {catalog.length} conversación(es) · {catalog.filter(c => c.source === 'ai').length} por IA · {catalog.filter(c => c.source !== 'ai').length} base
+            </p>
           </div>
           <button onClick={seedCatalog}
             className="rounded-lg border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted">
