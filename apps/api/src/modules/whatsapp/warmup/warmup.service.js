@@ -71,6 +71,25 @@ export function rampTargetForDay(cfg, day) {
   return Math.min(Math.round(target), cfg.daily_cap ?? 50)
 }
 
+// Objetivo de mensajes que sube en escalones cada 3 HORAS (más suave/humano que
+// el salto diario). Interpola de ramp_start a ramp_end a lo largo de warmup_days,
+// avanzando un paso cada 3 h de reloj desde que arrancó el chip. Tope: daily_cap.
+export function rampTargetStepped(cfg, startedAt, now = new Date()) {
+  const start = Number(cfg.ramp_start ?? 5)
+  const end   = Number(cfg.ramp_end ?? 40)
+  const days  = Math.max(1, Number(cfg.warmup_days ?? 7))
+  const cap   = Number(cfg.daily_cap ?? 50)
+  if (!startedAt) return Math.min(Math.round(start), cap)
+
+  const STEP_H     = 3
+  const totalSteps = Math.max(1, Math.round((days * 24) / STEP_H))   // p.ej. 7 días → 56 pasos
+  const elapsedH   = Math.max(0, (now.getTime() - new Date(startedAt).getTime()) / 3600000)
+  const step       = Math.min(totalSteps - 1, Math.floor(elapsedH / STEP_H))
+  const frac       = totalSteps <= 1 ? 1 : step / (totalSteps - 1)
+  const target     = start + (end - start) * frac
+  return Math.min(Math.round(target), cap)
+}
+
 // ── Ventana horaria y días activos ───────────────────────────────────────────
 const DAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 

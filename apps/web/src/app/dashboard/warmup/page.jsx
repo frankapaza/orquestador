@@ -13,6 +13,25 @@ const DAYS = [
   ['fri', 'V'], ['sat', 'S'], ['sun', 'D'],
 ]
 
+// Perfiles de rampa (el volumen sube cada 3 horas hasta el tope del día 7).
+const RAMP_PRESETS = {
+  conservador: { ramp_start: 5,  ramp_end: 40,  warmup_days: 7, daily_cap: 50,  label: 'Conservador' },
+  moderado:    { ramp_start: 8,  ramp_end: 70,  warmup_days: 7, daily_cap: 80,  label: 'Moderado' },
+  agresivo:    { ramp_start: 12, ramp_end: 100, warmup_days: 7, daily_cap: 110, label: 'Agresivo' },
+}
+function detectProfile(cfg) {
+  for (const [k, p] of Object.entries(RAMP_PRESETS)) {
+    if (Number(cfg.ramp_start) === p.ramp_start && Number(cfg.ramp_end) === p.ramp_end &&
+        Number(cfg.warmup_days) === p.warmup_days && Number(cfg.daily_cap) === p.daily_cap) return k
+  }
+  return 'personalizado'
+}
+// Estimado de mensajes por chip en toda la semana (área bajo la rampa).
+function weeklyEstimate(cfg) {
+  const s = Number(cfg.ramp_start || 0), e = Number(cfg.ramp_end || 0), d = Number(cfg.warmup_days || 7)
+  return Math.round(((s + e) / 2) * d)
+}
+
 const card = 'rounded-2xl border bg-card shadow-sm'
 const label = 'text-xs font-semibold text-foreground'
 const input = 'mt-1 w-full rounded-xl border border-transparent bg-muted/60 px-3 py-2 text-sm transition-colors focus:border-ring focus:bg-background focus:outline-none'
@@ -124,6 +143,12 @@ export default function WarmupPage() {
     const cur = (cfg.active_days ?? '').split(',').filter(Boolean)
     const next = cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d]
     setField('active_days', next.join(','))
+  }
+
+  function applyPreset(name) {
+    const p = RAMP_PRESETS[name]
+    if (!p) return  // "personalizado": no toca nada, el usuario edita a mano
+    setCfg(c => ({ ...c, ramp_start: p.ramp_start, ramp_end: p.ramp_end, warmup_days: p.warmup_days, daily_cap: p.daily_cap }))
   }
 
   async function saveConfig() {
@@ -280,6 +305,27 @@ export default function WarmupPage() {
             <input type="checkbox" className="h-5 w-5 accent-jungle-green-600" checked={!!cfg.is_enabled}
                    onChange={e => setField('is_enabled', e.target.checked)} />
           </label>
+        </div>
+
+        {/* Perfil de rampa (combo) — el volumen sube cada 3 horas */}
+        <div className="flex flex-wrap items-end gap-4 border-b bg-muted/20 p-5">
+          <div className="min-w-[200px]">
+            <span className={label}>Perfil de rampa</span>
+            <select className={input} value={detectProfile(cfg)} onChange={e => applyPreset(e.target.value)}>
+              <option value="conservador">Conservador (5 → 40/día)</option>
+              <option value="moderado">Moderado (8 → 70/día)</option>
+              <option value="agresivo">Agresivo (12 → 100/día)</option>
+              <option value="personalizado">Personalizado</option>
+            </select>
+          </div>
+          <div className="rounded-xl bg-background px-4 py-2 text-sm">
+            <span className="text-muted-foreground">Estimado por chip/semana: </span>
+            <span className="font-semibold text-foreground">~{weeklyEstimate(cfg)} mensajes</span>
+            <span className="text-muted-foreground"> · {chips.filter(c => c.warmup_enabled).length} chips ≈ ~{weeklyEstimate(cfg) * Math.max(1, chips.filter(c => c.warmup_enabled).length)}</span>
+          </div>
+          <p className="w-full text-xs text-muted-foreground">
+            El volumen sube en escalones <b className="text-foreground">cada 3 horas</b> (más humano que el salto diario), desde el inicio hasta el tope del día {cfg.warmup_days ?? 7}. “Personalizado” = ajusta los campos de abajo a mano.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 gap-4 p-5 sm:grid-cols-2 lg:grid-cols-3">

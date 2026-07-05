@@ -3,7 +3,7 @@ import { baileysManager } from '../baileys.manager.js'
 import { enqueueWarmupTurn } from './warmup.queue.js'
 import { varyText } from './catalog.seed.js'
 import {
-  getWarmupConfig, effectiveConfig, isActiveNow, rampTargetForDay,
+  getWarmupConfig, effectiveConfig, isActiveNow, rampTargetStepped,
   sentTodayFor, getActiveConversations, randomDelayMs, recordWarmupSent, threadKeyFor,
 } from './warmup.service.js'
 
@@ -25,6 +25,7 @@ async function ensureWarmupDay(chip, cfg) {
       UPDATE whatsapp_accounts SET warmup_started_at = now(), warmup_day = 1
       WHERE id = ${chip.id}
     `
+    chip.warmup_started_at = new Date().toISOString()  // reflejar para este mismo tick
     return 1
   }
   const started  = new Date(chip.warmup_started_at)
@@ -135,7 +136,8 @@ async function tickClient(clientId) {
     const ecfg = effectiveConfig(cfg, c)
     const day  = await ensureWarmupDay(c, ecfg)
     if (day == null) continue
-    const target = Math.min(rampTargetForDay(ecfg, day), ecfg.daily_cap ?? 50)
+    // Objetivo que sube cada 3 horas (rampTargetStepped ya aplica el daily_cap).
+    const target = rampTargetStepped(ecfg, c.warmup_started_at)
     const sent   = await sentTodayFor(c.id)
     const remaining = target - sent
     if (remaining > 0) {
