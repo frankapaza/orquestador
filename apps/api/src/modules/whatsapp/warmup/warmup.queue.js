@@ -3,6 +3,7 @@ import { redis } from '../../../lib/redis.js'
 import { sql } from '../../../lib/db.js'
 import { baileysManager } from '../baileys.manager.js'
 import { recordWarmupMessage } from './warmup.service.js'
+import { bus } from '../../../lib/eventBus.js'
 
 const QUEUE_NAME = 'warmup-jobs'
 
@@ -59,6 +60,9 @@ export function startWarmupWorker() {
         peerKind:      job.data.peerKind,
         text,
       }).catch(e => console.error('[Warmup] recordWarmupMessage:', e.message))
+
+      // Push en tiempo real al frontend (SSE) para el visor de chat.
+      bus.emit(acc.client_id, { type: 'warmup:message', thread_key: job.data.threadKey, at: Date.now() })
 
       return { sent: true }
     },

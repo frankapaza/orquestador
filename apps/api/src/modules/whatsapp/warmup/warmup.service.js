@@ -138,15 +138,14 @@ export async function internalAccountsByPhone(clientId) {
 // ── Stats diarias agregadas (contador ligero, sin guardar contenido) ─────────
 // Fecha de "hoy" en hora peruana (America/Lima), para que el día ruede a la
 // medianoche de Perú y no a la del servidor (UTC).
-export function todayLima() {
+export function todayLima(now = new Date()) {
   try {
     // en-CA formatea como YYYY-MM-DD
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(new Date())
+    }).format(now)
   } catch {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   }
 }
 const today = todayLima

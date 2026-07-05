@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import api from '../../../lib/api'
 
 const RISK_META = {
@@ -47,6 +47,15 @@ function fmtWhen(iso) {
   try { return new Date(iso).toLocaleString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) }
   catch { return '' }
 }
+// Cuenta regresiva legible a partir de milisegundos restantes.
+function fmtCountdown(ms) {
+  const s = Math.max(0, Math.floor((ms ?? 0) / 1000))
+  if (s <= 0) return 'ahora…'
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`
+  return `${sec}s`
+}
 
 export default function WarmupPage() {
   const [cfg, setCfg]         = useState(null)
@@ -61,9 +70,26 @@ export default function WarmupPage() {
   const [alerts, setAlerts]   = useState([])
   const [nextConv, setNextConv] = useState(null)
   const [ctrlBusy, setCtrlBusy] = useState(false)
+  const [nowTs, setNowTs]     = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
   const [msg, setMsg]         = useState(null)
+
+  // Refs para que los handlers de SSE/ticker lean el valor actual sin re-suscribir.
+  const activeThreadRef = useRef(null)
+  const nextConvRef     = useRef(null)
+  const lastRefreshRef  = useRef(0)
+  useEffect(() => { activeThreadRef.current = activeThread }, [activeThread])
+  useEffect(() => { nextConvRef.current = nextConv }, [nextConv])
+
+  // Refresco puntual (usado por SSE y cuando la cuenta regresiva llega a 0).
+  const refreshLive = useCallback(() => {
+    lastRefreshRef.current = Date.now()
+    api.get('/whatsapp/warmup/chats').then(r => setChats(r.data)).catch(() => {})
+    api.get('/whatsapp/warmup/next').then(r => setNextConv(r.data)).catch(() => {})
+    const th = activeThreadRef.current
+    if (th) api.get('/whatsapp/warmup/chat', { params: { thread: th } }).then(r => setThreadMsgs(r.data)).catch(() => {})
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -92,29 +118,51 @@ export default function WarmupPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Auto-refresh de la lista de chats y de "próxima conversación" cada 6s.
+  // Tiempo real vía SSE (mismo canal /events que usa el Inbox). Al recibir un
+  // mensaje de warmup, refresca chat + próxima conversación al instante.
+  // Fallback a polling solo si el SSE se cae.
   useEffect(() => {
+    const base = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1'
+    const token = typeof window !== 'undefined' ? localStorage.getItem('kubo_token') : null
+    if (!token) return
+    let es = null, poll = null, closed = false
+    const open = () => {
+      if (closed) return
+      try {
+        es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`)
+        es.addEventListener('warmup:message', () => refreshLive())
+        es.onerror = () => { if (!poll) poll = setInterval(refreshLive, 20000) }
+        es.onopen  = () => { if (poll) { clearInterval(poll); poll = null } }
+      } catch {}
+    }
+    open()
+    return () => { closed = true; es?.close(); if (poll) clearInterval(poll) }
+  }, [refreshLive])
+
+  // Ticker de 1s: mueve la cuenta regresiva y, al llegar a 0, refresca.
+  useEffect(() => {
+    setNowTs(Date.now())
     const t = setInterval(() => {
-      api.get('/whatsapp/warmup/chats').then(r => setChats(r.data)).catch(() => {})
-      api.get('/whatsapp/warmup/next').then(r => setNextConv(r.data)).catch(() => {})
-    }, 6000)
+      const n = Date.now()
+      setNowTs(n)
+      const na = nextConvRef.current?.next_at
+      if (na && n >= new Date(na).getTime() && n - lastRefreshRef.current > 8000) refreshLive()
+    }, 1000)
     return () => clearInterval(t)
-  }, [])
+  }, [refreshLive])
 
   // Abrir automáticamente la conversación más reciente al entrar.
   useEffect(() => {
     if (!activeThread && chats.length > 0) setActiveThread(chats[0].thread_key)
   }, [chats, activeThread])
 
-  // Cargar (y refrescar) los mensajes del hilo activo.
+  // Cargar los mensajes al cambiar de hilo (las actualizaciones llegan por SSE).
   useEffect(() => {
     if (!activeThread) return
     let alive = true
-    const fetchMsgs = () => api.get('/whatsapp/warmup/chat', { params: { thread: activeThread } })
+    api.get('/whatsapp/warmup/chat', { params: { thread: activeThread } })
       .then(r => { if (alive) setThreadMsgs(r.data) }).catch(() => {})
-    fetchMsgs()
-    const t = setInterval(fetchMsgs, 6000)
-    return () => { alive = false; clearInterval(t) }
+    return () => { alive = false }
   }, [activeThread])
 
   function flash(type, text) {
@@ -263,7 +311,12 @@ export default function WarmupPage() {
         </button>
         {nextConv && cfg.is_enabled && (
           <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">
-            🕒 Próxima conversación: {nextConv.label}
+            🕒 Próxima conversación:{' '}
+            <span className="font-mono font-semibold tabular-nums">
+              {nextConv.next_at
+                ? `en ${fmtCountdown(new Date(nextConv.next_at).getTime() - nowTs)}`
+                : (nextConv.label ?? '—')}
+            </span>
           </span>
         )}
       </section>

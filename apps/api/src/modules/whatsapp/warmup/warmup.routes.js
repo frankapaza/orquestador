@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { sql } from '../../../lib/db.js'
 import { encrypt } from '../../../lib/crypto.js'
 import { baileysManager } from '../baileys.manager.js'
-import { getWarmupConfig, upsertWarmupConfig, todayLima, isActiveNow, rampTargetStepped, localParts } from './warmup.service.js'
+import { getWarmupConfig, upsertWarmupConfig, todayLima, isActiveNow, rampTargetStepped } from './warmup.service.js'
 import { seedWarmupCatalog } from './catalog.seed.js'
 import { recomputeRisk } from './risk.service.js'
 import { generateCatalog, testAiConnection, AI_PRESETS, AI_MODEL_HINTS } from './ai.generator.js'
@@ -15,38 +15,24 @@ function publicConfig(cfg) {
   return { ...rest, has_ai_key: !!ai_api_key_enc }
 }
 
-// Calcula una estimación humana de cuándo será la próxima ronda de conversaciones.
-const DAY_ORDER = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
-const DAY_NAMES = { mon: 'lunes', tue: 'martes', wed: 'miércoles', thu: 'jueves', fri: 'viernes', sat: 'sábado', sun: 'domingo' }
-function nextConversationInfo(cfg, connected, active) {
-  const pad = n => String(n).padStart(2, '0')
-  if (active) {
-    const withBudget = connected.some(r => rampTargetStepped(cfg, r.warmup_started_at) - r.sent > 0)
-    if (withBudget) {
-      const min = new Date().getMinutes()
-      const toNext = 10 - (min % 10)  // el planificador corre cada 10 min
-      return { status: 'soon', label: `en ~${toNext} min (próxima ronda)` }
+// Busca hacia adelante el próximo instante (real, para cuenta regresiva) en que
+// un chip podrá conversar: dentro del horario activo Y con cupo disponible según
+// la rampa por 3h. Ojo: el cupo diario se reinicia a medianoche de Perú.
+function nextSendAt(cfg, chips, now = new Date()) {
+  const STEP = 10 * 60000            // resolución de búsqueda: 10 min
+  const HORIZON = 8 * 24 * 3600000   // hasta 8 días
+  const todayNow = todayLima(now)
+  for (let t = STEP; t <= HORIZON; t += STEP) {
+    const T = new Date(now.getTime() + t)
+    if (!isActiveNow(cfg, T)) continue
+    const sameDay = todayLima(T) === todayNow
+    for (const c of chips) {
+      const target  = rampTargetStepped(cfg, c.startedAt, T)
+      const effSent = sameDay ? c.sent : 0   // el contador se reinicia otro día
+      if (target - effSent > 0) return T
     }
-    return { status: 'quota', label: 'cupo del momento completo · sube en el próximo escalón (cada 3 h)' }
   }
-  // Fuera de horario: buscar la próxima apertura de ventana (en zona del cliente).
-  const activeDays = (cfg.active_days ?? '').split(',').map(s => s.trim()).filter(Boolean)
-  const start = (cfg.active_hours_start ?? '08:00').slice(0, 5)
-  const end   = (cfg.active_hours_end ?? '20:00').slice(0, 5)
-  const p = localParts(cfg.timezone || 'America/Lima')
-  const curHM = `${pad(p.hour)}:${pad(p.minute)}`
-  for (let off = 0; off < 8; off++) {
-    const dk = DAY_ORDER[(DAY_ORDER.indexOf(p.day) + off) % 7]
-    if (activeDays.length && !activeDays.includes(dk)) continue
-    if (off === 0) {
-      if (curHM < start) return { status: 'window', label: `hoy a las ${start}` }
-      if (curHM <= end)  return { status: 'soon', label: 'en breve' } // borde raro
-      continue // la ventana de hoy ya pasó
-    }
-    const when = off === 1 ? 'mañana' : DAY_NAMES[dk]
-    return { status: 'window', label: `${when} a las ${start}` }
-  }
-  return { status: 'window', label: '—' }
+  return null
 }
 
 const timeStr = z.string().regex(/^\d{2}:\d{2}$/)
@@ -141,7 +127,18 @@ export async function warmupRoutes(fastify) {
     const connected = rows.filter(r => baileysManager.getStatus(r.instance_name) === 'connected')
     if (!connected.length) return { status: 'no_chips', label: 'sin chips conectados' }
 
-    return nextConversationInfo(cfg, connected, isActiveNow(cfg))
+    const chips = connected.map(r => ({ startedAt: r.warmup_started_at, sent: Number(r.sent) }))
+    const now = new Date()
+
+    // ¿Activo y con cupo ahora? → próxima ronda en el siguiente tick de 10 min.
+    if (isActiveNow(cfg, now) && chips.some(c => rampTargetStepped(cfg, c.startedAt, now) - c.sent > 0)) {
+      const nextTick = new Date(Math.ceil((now.getTime() + 1000) / 600000) * 600000)
+      return { status: 'soon', next_at: nextTick.toISOString() }
+    }
+
+    const at = nextSendAt(cfg, chips, now)
+    if (!at) return { status: 'done', label: 'calentamiento por completar' }
+    return { status: 'scheduled', next_at: at.toISOString() }
   })
 
   // ── Agente IA (generación del catálogo) ───────────────────────────────────
