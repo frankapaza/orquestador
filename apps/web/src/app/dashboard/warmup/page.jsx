@@ -59,6 +59,7 @@ export default function WarmupPage() {
   const [activeThread, setActiveThread] = useState(null)
   const [threadMsgs, setThreadMsgs] = useState([])
   const [alerts, setAlerts]   = useState([])
+  const [nextConv, setNextConv] = useState(null)
   const [ctrlBusy, setCtrlBusy] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -81,6 +82,7 @@ export default function WarmupPage() {
       setAi(aiRes.data)
       setChats(ch.data)
       setAlerts(al.data)
+      api.get('/whatsapp/warmup/next').then(r => setNextConv(r.data)).catch(() => {})
     } catch (e) {
       setMsg({ type: 'error', text: 'No se pudo cargar la configuración' })
     } finally {
@@ -90,10 +92,11 @@ export default function WarmupPage() {
 
   useEffect(() => { load() }, [load])
 
-  // Auto-refresh de la lista de chats cada 6s.
+  // Auto-refresh de la lista de chats y de "próxima conversación" cada 6s.
   useEffect(() => {
     const t = setInterval(() => {
       api.get('/whatsapp/warmup/chats').then(r => setChats(r.data)).catch(() => {})
+      api.get('/whatsapp/warmup/next').then(r => setNextConv(r.data)).catch(() => {})
     }, 6000)
     return () => clearInterval(t)
   }, [])
@@ -258,7 +261,11 @@ export default function WarmupPage() {
           className="inline-flex items-center gap-1.5 rounded-xl bg-red-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-600 disabled:opacity-60">
           ⏹ Detener
         </button>
-        <span className="text-xs text-muted-foreground">“Iniciar” arranca al instante e incluye chips nuevos.</span>
+        {nextConv && cfg.is_enabled && (
+          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700">
+            🕒 Próxima conversación: {nextConv.label}
+          </span>
+        )}
       </section>
 
       {msg && (

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { sql } from '../../../lib/db.js'
 import { encrypt } from '../../../lib/crypto.js'
 import { baileysManager } from '../baileys.manager.js'
-import { getWarmupConfig, upsertWarmupConfig, todayLima } from './warmup.service.js'
+import { getWarmupConfig, upsertWarmupConfig, todayLima, isActiveNow, rampTargetStepped, localParts } from './warmup.service.js'
 import { seedWarmupCatalog } from './catalog.seed.js'
 import { recomputeRisk } from './risk.service.js'
 import { generateCatalog, testAiConnection, AI_PRESETS, AI_MODEL_HINTS } from './ai.generator.js'
@@ -13,6 +13,40 @@ import { drainWarmupJobs } from './warmup.queue.js'
 function publicConfig(cfg) {
   const { ai_api_key_enc, ...rest } = cfg
   return { ...rest, has_ai_key: !!ai_api_key_enc }
+}
+
+// Calcula una estimación humana de cuándo será la próxima ronda de conversaciones.
+const DAY_ORDER = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
+const DAY_NAMES = { mon: 'lunes', tue: 'martes', wed: 'miércoles', thu: 'jueves', fri: 'viernes', sat: 'sábado', sun: 'domingo' }
+function nextConversationInfo(cfg, connected, active) {
+  const pad = n => String(n).padStart(2, '0')
+  if (active) {
+    const withBudget = connected.some(r => rampTargetStepped(cfg, r.warmup_started_at) - r.sent > 0)
+    if (withBudget) {
+      const min = new Date().getMinutes()
+      const toNext = 10 - (min % 10)  // el planificador corre cada 10 min
+      return { status: 'soon', label: `en ~${toNext} min (próxima ronda)` }
+    }
+    return { status: 'quota', label: 'cupo del momento completo · sube en el próximo escalón (cada 3 h)' }
+  }
+  // Fuera de horario: buscar la próxima apertura de ventana (en zona del cliente).
+  const activeDays = (cfg.active_days ?? '').split(',').map(s => s.trim()).filter(Boolean)
+  const start = (cfg.active_hours_start ?? '08:00').slice(0, 5)
+  const end   = (cfg.active_hours_end ?? '20:00').slice(0, 5)
+  const p = localParts(cfg.timezone || 'America/Lima')
+  const curHM = `${pad(p.hour)}:${pad(p.minute)}`
+  for (let off = 0; off < 8; off++) {
+    const dk = DAY_ORDER[(DAY_ORDER.indexOf(p.day) + off) % 7]
+    if (activeDays.length && !activeDays.includes(dk)) continue
+    if (off === 0) {
+      if (curHM < start) return { status: 'window', label: `hoy a las ${start}` }
+      if (curHM <= end)  return { status: 'soon', label: 'en breve' } // borde raro
+      continue // la ventana de hoy ya pasó
+    }
+    const when = off === 1 ? 'mañana' : DAY_NAMES[dk]
+    return { status: 'window', label: `${when} a las ${start}` }
+  }
+  return { status: 'window', label: '—' }
 }
 
 const timeStr = z.string().regex(/^\d{2}:\d{2}$/)
@@ -88,6 +122,26 @@ export async function warmupRoutes(fastify) {
     `
     await drainWarmupJobs()
     return { ok: true, status: 'stopped' }
+  })
+
+  // ── Próxima conversación (estimación) ─────────────────────────────────────
+  fastify.get('/whatsapp/warmup/next', { onRequest: pre }, async (req) => {
+    const cfg = await getWarmupConfig(req.user.sub)
+    if (!cfg.is_enabled) return { status: 'stopped', label: 'detenido' }
+
+    const today = todayLima()
+    const rows = await sql`
+      SELECT wa.id, wa.instance_name, wa.warmup_started_at,
+             COALESCE(s.warmup_sent, 0) AS sent
+      FROM whatsapp_accounts wa
+      LEFT JOIN warmup_daily_stats s ON s.account_id = wa.id AND s.stat_date = ${today}
+      WHERE wa.client_id = ${req.user.sub} AND wa.provider = 'baileys'
+        AND wa.warmup_enabled = true AND wa.banned_at IS NULL AND wa.phone_number IS NOT NULL
+    `
+    const connected = rows.filter(r => baileysManager.getStatus(r.instance_name) === 'connected')
+    if (!connected.length) return { status: 'no_chips', label: 'sin chips conectados' }
+
+    return nextConversationInfo(cfg, connected, isActiveNow(cfg))
   })
 
   // ── Agente IA (generación del catálogo) ───────────────────────────────────
