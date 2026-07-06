@@ -357,13 +357,20 @@ export async function warmupRoutes(fastify) {
 
   fastify.get('/whatsapp/warmup/chat', { onRequest: pre }, async (req) => {
     const { thread } = z.object({ thread: z.string().min(1) }).parse(req.query)
+    // Traer los 500 mensajes MÁS RECIENTES (no los más antiguos) y devolverlos en
+    // orden ascendente para mostrarlos. Si se ordenara ASC con LIMIT, en hilos con
+    // +500 mensajes se cortaban los últimos y el mensaje nuevo no aparecía en el chat
+    // aunque sí en la tarjeta (que usa max(created_at)).
     return sql`
-      SELECT m.id, m.from_account_id, wa.name AS from_name, m.peer_kind, m.text, m.created_at
-      FROM warmup_messages m
-      LEFT JOIN whatsapp_accounts wa ON wa.id = m.from_account_id
-      WHERE m.client_id = ${req.user.sub} AND m.thread_key = ${thread}
-      ORDER BY m.created_at ASC
-      LIMIT 500
+      SELECT * FROM (
+        SELECT m.id, m.from_account_id, wa.name AS from_name, m.peer_kind, m.text, m.created_at
+        FROM warmup_messages m
+        LEFT JOIN whatsapp_accounts wa ON wa.id = m.from_account_id
+        WHERE m.client_id = ${req.user.sub} AND m.thread_key = ${thread}
+        ORDER BY m.created_at DESC
+        LIMIT 500
+      ) t
+      ORDER BY t.created_at ASC
     `
   })
 
