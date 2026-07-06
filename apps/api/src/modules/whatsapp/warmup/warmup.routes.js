@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { sql } from '../../../lib/db.js'
 import { encrypt } from '../../../lib/crypto.js'
 import { baileysManager } from '../baileys.manager.js'
-import { getWarmupConfig, upsertWarmupConfig, todayLima, isActiveNow, rampTargetStepped } from './warmup.service.js'
+import { getWarmupConfig, upsertWarmupConfig, todayLima, isActiveNow, convTargetForDay, activeElapsedFraction } from './warmup.service.js'
 import { seedWarmupCatalog } from './catalog.seed.js'
 import { recomputeRisk } from './risk.service.js'
 import { generateCatalog, testAiConnection, AI_PRESETS, AI_MODEL_HINTS } from './ai.generator.js'
@@ -15,9 +15,21 @@ function publicConfig(cfg) {
   return { ...rest, has_ai_key: !!ai_api_key_enc }
 }
 
+function dayFromStart(startedAt, when) {
+  if (!startedAt) return 1
+  const elapsed = Math.floor((when.getTime() - new Date(startedAt).getTime()) / 86400000)
+  return Math.max(1, elapsed + 1)
+}
+
+// Cupo de CONVERSACIONES liberado para un chip en el instante T (flujo continuo).
+function convAllowedAt(cfg, startedAt, T) {
+  const day = dayFromStart(startedAt, T)
+  return Math.max(1, Math.ceil(convTargetForDay(cfg, day) * activeElapsedFraction(cfg, T)))
+}
+
 // Busca hacia adelante el próximo instante (real, para cuenta regresiva) en que
-// un chip podrá conversar: dentro del horario activo Y con cupo disponible según
-// la rampa por 3h. Ojo: el cupo diario se reinicia a medianoche de Perú.
+// un chip podrá conversar: dentro del horario activo Y con cupo disponible.
+// Ojo: el cupo diario se reinicia a medianoche de Perú.
 function nextSendAt(cfg, chips, now = new Date()) {
   const STEP = 10 * 60000            // resolución de búsqueda: 10 min
   const HORIZON = 8 * 24 * 3600000   // hasta 8 días
@@ -27,9 +39,8 @@ function nextSendAt(cfg, chips, now = new Date()) {
     if (!isActiveNow(cfg, T)) continue
     const sameDay = todayLima(T) === todayNow
     for (const c of chips) {
-      const target  = rampTargetStepped(cfg, c.startedAt, T)
       const effSent = sameDay ? c.sent : 0   // el contador se reinicia otro día
-      if (target - effSent > 0) return T
+      if (convAllowedAt(cfg, c.startedAt, T) - effSent > 0) return T
     }
   }
   return null
@@ -53,6 +64,10 @@ const configSchema = z.object({
   internal_ratio:     z.number().min(0).max(1).optional(),
   simulate_typing:    z.boolean().optional(),
   mark_read:          z.boolean().optional(),
+  conv_start:         z.number().int().min(1).optional(),
+  conv_growth:        z.number().min(1).max(10).optional(),
+  conv_cap:           z.number().int().min(1).optional(),
+  allow_external:     z.boolean().optional(),
 }).strict()
 
 export async function warmupRoutes(fastify) {
@@ -118,7 +133,7 @@ export async function warmupRoutes(fastify) {
     const today = todayLima()
     const rows = await sql`
       SELECT wa.id, wa.instance_name, wa.warmup_started_at,
-             COALESCE(s.warmup_sent, 0) AS sent
+             COALESCE(s.warmup_conv, 0) AS sent
       FROM whatsapp_accounts wa
       LEFT JOIN warmup_daily_stats s ON s.account_id = wa.id AND s.stat_date = ${today}
       WHERE wa.client_id = ${req.user.sub} AND wa.provider = 'baileys'
@@ -131,7 +146,7 @@ export async function warmupRoutes(fastify) {
     const now = new Date()
 
     // ¿Activo y con cupo ahora? → próxima ronda en el siguiente tick de 10 min.
-    if (isActiveNow(cfg, now) && chips.some(c => rampTargetStepped(cfg, c.startedAt, now) - c.sent > 0)) {
+    if (isActiveNow(cfg, now) && chips.some(c => convAllowedAt(cfg, c.startedAt, now) - c.sent > 0)) {
       const nextTick = new Date(Math.ceil((now.getTime() + 1000) / 600000) * 600000)
       return { status: 'soon', next_at: nextTick.toISOString() }
     }

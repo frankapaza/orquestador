@@ -27,13 +27,16 @@ export function resolveAiSettings(cfg) {
   }
 }
 
-const SYSTEM = `Eres un generador de conversaciones cortas y naturales de WhatsApp en español latino, informales y cotidianas (saludos, planes, trabajo, comida, favores, clima, recordatorios). Dos personas: "a" y "b". Nada de temas sensibles, ventas ni spam.`
+const SYSTEM = `Eres un generador de conversaciones de WhatsApp en español latino, informales y cotidianas. Dos personas: "a" y "b". Reglas:
+- COHERENCIA: cada mensaje responde con sentido al anterior; la conversación se entiende de principio a fin y tiene un mini-hilo lógico (una pregunta se responde, un plan se concreta, etc.).
+- VARIEDAD: cada conversación trata un tema DISTINTO (saludos, planes, trabajo, comida, favores, clima, estudios, deporte, familia, compras, viajes, salud, tecnología, música, mascotas…). No repitas temas ni frases entre conversaciones.
+- NATURALIDAD: frases cortas, tono real de chat, con algún emoji o "jaja" ocasional. Nada de ventas, spam ni temas sensibles.`
 
 function buildUserPrompt(count) {
-  return `Genera ${count} conversaciones DISTINTAS y variadas.
-Cada una: 4 a 8 turnos alternando entre "a" y "b", frases cortas y realistas (pueden llevar algún emoji o "jaja").
+  return `Genera ${count} conversaciones DISTINTAS entre sí (temas variados, sin repetir), cada una COHERENTE de principio a fin, para usar durante toda una semana de calentamiento.
+Cada conversación: 4 a 8 turnos alternando "a" y "b".
 Responde SOLO JSON válido con esta forma exacta:
-{"conversations":[{"topic":"tema-corto","turns":[{"from":"a","text":"..."},{"from":"b","text":"..."}]}]}`
+{"conversations":[{"topic":"tema-corto-distinto","turns":[{"from":"a","text":"..."},{"from":"b","text":"..."}]}]}`
 }
 
 // Llama al proveedor y devuelve el texto de la respuesta.
@@ -101,7 +104,25 @@ export async function generateCatalog(clientId, count = 20) {
   const conversations = parseConversations(content)
   if (!conversations.length) throw new Error('La IA no generó conversaciones utilizables')
 
-  const rows = conversations.map(c => ({
+  // Dedup: descartar repetidas dentro del lote y contra el catálogo existente,
+  // usando la primera frase normalizada como huella.
+  const fp = c => (c.turns?.[0]?.text ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().slice(0, 50)
+  const existing = await sql`
+    SELECT turns FROM warmup_conversations WHERE (client_id = ${clientId} OR client_id IS NULL) AND is_active = true
+  `
+  const seen = new Set(existing.map(r => {
+    try { const t = typeof r.turns === 'string' ? JSON.parse(r.turns) : r.turns; return fp({ turns: t }) } catch { return '' }
+  }))
+  const unique = []
+  for (const c of conversations) {
+    const key = fp(c)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    unique.push(c)
+  }
+  if (!unique.length) throw new Error('La IA solo generó conversaciones repetidas; intenta de nuevo')
+
+  const rows = unique.map(c => ({
     client_id: clientId,
     topic:     c.topic,
     lang:      'es',
@@ -110,7 +131,7 @@ export async function generateCatalog(clientId, count = 20) {
   }))
   await sql`INSERT INTO warmup_conversations ${sql(rows, 'client_id', 'topic', 'lang', 'turns', 'source')}`
 
-  return { generated: rows.length, provider: settings.provider, model: settings.model }
+  return { generated: rows.length, skipped: conversations.length - rows.length, provider: settings.provider, model: settings.model }
 }
 
 // Desactiva las conversaciones IA más antiguas dejando solo las `keep` más recientes

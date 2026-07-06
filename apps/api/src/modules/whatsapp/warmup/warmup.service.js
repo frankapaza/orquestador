@@ -17,6 +17,11 @@ export const DEFAULT_WARMUP_CONFIG = {
   internal_ratio:     0.60,
   simulate_typing:    true,
   mark_read:          true,
+  // Rampa por conversaciones (flujo continuo, se multiplica cada día)
+  conv_start:         50,
+  conv_growth:        2.0,
+  conv_cap:           200,
+  allow_external:     false,  // solo entre chips activos; externos con check
 }
 
 export async function getWarmupConfig(clientId) {
@@ -33,6 +38,7 @@ export async function upsertWarmupConfig(clientId, patch) {
     'active_hours_start', 'active_hours_end', 'active_days', 'timezone',
     'ramp_start', 'ramp_end', 'ramp_mode', 'daily_cap',
     'internal_ratio', 'simulate_typing', 'mark_read',
+    'conv_start', 'conv_growth', 'conv_cap', 'allow_external',
   ]
   const values = Object.fromEntries(cols.map(c => [c, merged[c]]))
 
@@ -88,6 +94,31 @@ export function rampTargetStepped(cfg, startedAt, now = new Date()) {
   const frac       = totalSteps <= 1 ? 1 : step / (totalSteps - 1)
   const target     = start + (end - start) * frac
   return Math.min(Math.round(target), cap)
+}
+
+// Objetivo de CONVERSACIONES por día: se multiplica por conv_growth cada día
+// (día1=conv_start, día2=conv_start*growth, …), con tope conv_cap.
+export function convTargetForDay(cfg, day) {
+  const start  = Number(cfg.conv_start ?? 50)
+  const growth = Number(cfg.conv_growth ?? 2)
+  const cap    = Number(cfg.conv_cap ?? 200)
+  const d = Math.max(1, day)
+  return Math.min(Math.round(start * Math.pow(growth, d - 1)), cap)
+}
+
+// Fracción (0..1) de cuánto ha transcurrido la ventana activa HOY, en la zona
+// del cliente. Sirve para liberar las conversaciones en FLUJO CONTINUO a lo
+// largo del día (no de golpe ni en escalones).
+export function activeElapsedFraction(cfg, now = new Date()) {
+  const { hour, minute } = localParts(cfg.timezone || 'America/Lima', now)
+  const cur = hour * 60 + minute
+  const toMin = hm => { const [h, m] = (hm ?? '00:00').slice(0, 5).split(':').map(Number); return h * 60 + m }
+  const s = toMin(cfg.active_hours_start ?? '08:00')
+  const e = toMin(cfg.active_hours_end ?? '20:00')
+  if (e <= s) return 1
+  if (cur <= s) return 0
+  if (cur >= e) return 1
+  return (cur - s) / (e - s)
 }
 
 // ── Ventana horaria y días activos ───────────────────────────────────────────
@@ -176,11 +207,32 @@ export async function sentTodayFor(accountId) {
   return row?.warmup_sent ?? 0
 }
 
+// Conversaciones INICIADAS hoy por el chip (unidad de la rampa nueva).
+export async function recordWarmupConv(accountId, n = 1) {
+  await sql`
+    INSERT INTO warmup_daily_stats (account_id, stat_date, warmup_conv)
+    VALUES (${accountId}, ${today()}, ${n})
+    ON CONFLICT (account_id, stat_date)
+    DO UPDATE SET warmup_conv = warmup_daily_stats.warmup_conv + ${n}
+  `
+}
+
+export async function convSentTodayFor(accountId) {
+  const [row] = await sql`
+    SELECT warmup_conv FROM warmup_daily_stats
+    WHERE account_id = ${accountId} AND stat_date = ${today()}
+  `
+  return row?.warmup_conv ?? 0
+}
+
 // ── Catálogo de conversaciones ───────────────────────────────────────────────
+// Se devuelven ordenadas por MENOS usadas recientemente (rotación LRU) para no
+// repetir las mismas conversaciones.
 export async function getActiveConversations(clientId) {
   const rows = await sql`
     SELECT id, topic, turns FROM warmup_conversations
     WHERE (client_id = ${clientId} OR client_id IS NULL) AND is_active = true
+    ORDER BY last_used_at ASC NULLS FIRST
   `
   // Normalizar turns: algunas filas quedaron guardadas como string JSON (doble
   // codificación en columna JSONB). Garantizar siempre un array de turnos.
@@ -195,6 +247,11 @@ function safeParseTurns(s) {
     const v = JSON.parse(s)
     return Array.isArray(v) ? v : []
   } catch { return [] }
+}
+
+// Marca una conversación como usada ahora (para la rotación LRU).
+export async function markConversationUsed(id) {
+  await sql`UPDATE warmup_conversations SET last_used_at = now() WHERE id = ${id}`
 }
 
 // Delay aleatorio en ms entre dos mensajes según config.

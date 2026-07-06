@@ -13,23 +13,30 @@ const DAYS = [
   ['fri', 'V'], ['sat', 'S'], ['sun', 'D'],
 ]
 
-// Perfiles de rampa (el volumen sube cada 3 horas hasta el tope del día 7).
+// Perfiles de rampa por CONVERSACIONES/día (se multiplican cada día hasta el tope).
 const RAMP_PRESETS = {
-  conservador: { ramp_start: 5,  ramp_end: 40,  warmup_days: 7, daily_cap: 50,  label: 'Conservador' },
-  moderado:    { ramp_start: 8,  ramp_end: 70,  warmup_days: 7, daily_cap: 80,  label: 'Moderado' },
-  agresivo:    { ramp_start: 12, ramp_end: 100, warmup_days: 7, daily_cap: 110, label: 'Agresivo' },
+  conservador: { conv_start: 20, conv_growth: 1.5, conv_cap: 100, warmup_days: 7, label: 'Conservador' },
+  moderado:    { conv_start: 50, conv_growth: 2.0, conv_cap: 200, warmup_days: 7, label: 'Moderado' },
+  agresivo:    { conv_start: 100, conv_growth: 2.0, conv_cap: 400, warmup_days: 7, label: 'Agresivo' },
 }
 function detectProfile(cfg) {
   for (const [k, p] of Object.entries(RAMP_PRESETS)) {
-    if (Number(cfg.ramp_start) === p.ramp_start && Number(cfg.ramp_end) === p.ramp_end &&
-        Number(cfg.warmup_days) === p.warmup_days && Number(cfg.daily_cap) === p.daily_cap) return k
+    if (Number(cfg.conv_start) === p.conv_start && Number(cfg.conv_growth) === p.conv_growth &&
+        Number(cfg.conv_cap) === p.conv_cap && Number(cfg.warmup_days) === p.warmup_days) return k
   }
   return 'personalizado'
 }
-// Estimado de mensajes por chip en toda la semana (área bajo la rampa).
+// Objetivo de conversaciones el día d (se multiplica, con tope).
+function convTarget(cfg, d) {
+  const s = Number(cfg.conv_start || 0), g = Number(cfg.conv_growth || 1), cap = Number(cfg.conv_cap || 9999)
+  return Math.min(Math.round(s * Math.pow(g, d - 1)), cap)
+}
+// Estimado de CONVERSACIONES por chip en toda la semana (suma de los días).
 function weeklyEstimate(cfg) {
-  const s = Number(cfg.ramp_start || 0), e = Number(cfg.ramp_end || 0), d = Number(cfg.warmup_days || 7)
-  return Math.round(((s + e) / 2) * d)
+  const days = Number(cfg.warmup_days || 7)
+  let sum = 0
+  for (let d = 1; d <= days; d++) sum += convTarget(cfg, d)
+  return sum
 }
 
 const card = 'rounded-2xl border bg-card shadow-sm'
@@ -63,7 +70,7 @@ export default function WarmupPage() {
   const [catalog, setCatalog] = useState([])
   const [ai, setAi]           = useState(null)
   const [aiBusy, setAiBusy]   = useState(false)
-  const [genCount, setGenCount] = useState(20)
+  const [genCount, setGenCount] = useState(40)
   const [chats, setChats]       = useState([])
   const [activeThread, setActiveThread] = useState(null)
   const [threadMsgs, setThreadMsgs] = useState([])
@@ -199,7 +206,7 @@ export default function WarmupPage() {
   function applyPreset(name) {
     const p = RAMP_PRESETS[name]
     if (!p) return  // "personalizado": no toca nada, el usuario edita a mano
-    setCfg(c => ({ ...c, ramp_start: p.ramp_start, ramp_end: p.ramp_end, warmup_days: p.warmup_days, daily_cap: p.daily_cap }))
+    setCfg(c => ({ ...c, conv_start: p.conv_start, conv_growth: p.conv_growth, conv_cap: p.conv_cap, warmup_days: p.warmup_days }))
   }
 
   async function saveConfig() {
@@ -214,11 +221,11 @@ export default function WarmupPage() {
         active_hours_end:   cfg.active_hours_end?.slice(0, 5),
         active_days:        cfg.active_days,
         timezone:           cfg.timezone || 'America/Lima',
-        ramp_start:         Number(cfg.ramp_start),
-        ramp_end:           Number(cfg.ramp_end),
-        ramp_mode:          cfg.ramp_mode,
-        daily_cap:          Number(cfg.daily_cap),
+        conv_start:         Number(cfg.conv_start),
+        conv_growth:        Number(cfg.conv_growth),
+        conv_cap:           Number(cfg.conv_cap),
         internal_ratio:     Number(cfg.internal_ratio),
+        allow_external:     !!cfg.allow_external,
         simulate_typing:    !!cfg.simulate_typing,
         mark_read:          !!cfg.mark_read,
       }
@@ -262,7 +269,7 @@ export default function WarmupPage() {
     try {
       const { data } = await api.post('/whatsapp/warmup/catalog/generate', { count: Number(genCount) })
       await load()
-      flash('ok', `${data.generated} conversaciones generadas con ${data.provider}`)
+      flash('ok', `${data.generated} conversaciones nuevas con ${data.provider}${data.skipped ? ` (${data.skipped} repetidas descartadas)` : ''}`)
     } catch (e) {
       flash('error', e.response?.data?.error ?? 'Error al generar con IA')
     } finally { setAiBusy(false) }
@@ -367,24 +374,24 @@ export default function WarmupPage() {
           </label>
         </div>
 
-        {/* Perfil de rampa (combo) — el volumen sube cada 3 horas */}
+        {/* Perfil de rampa (combo) — conversaciones/día que se multiplican */}
         <div className="flex flex-wrap items-end gap-4 border-b bg-muted/20 p-5">
-          <div className="min-w-[200px]">
+          <div className="min-w-[220px]">
             <span className={label}>Perfil de rampa</span>
             <select className={input} value={detectProfile(cfg)} onChange={e => applyPreset(e.target.value)}>
-              <option value="conservador">Conservador (5 → 40/día)</option>
-              <option value="moderado">Moderado (8 → 70/día)</option>
-              <option value="agresivo">Agresivo (12 → 100/día)</option>
+              <option value="conservador">Conservador (20/día ×1.5)</option>
+              <option value="moderado">Moderado (50/día ×2)</option>
+              <option value="agresivo">Agresivo (100/día ×2)</option>
               <option value="personalizado">Personalizado</option>
             </select>
           </div>
           <div className="rounded-xl bg-background px-4 py-2 text-sm">
-            <span className="text-muted-foreground">Estimado por chip/semana: </span>
-            <span className="font-semibold text-foreground">~{weeklyEstimate(cfg)} mensajes</span>
+            <span className="text-muted-foreground">Conversaciones por chip/semana: </span>
+            <span className="font-semibold text-foreground">~{weeklyEstimate(cfg)}</span>
             <span className="text-muted-foreground"> · {chips.filter(c => c.warmup_enabled).length} chips ≈ ~{weeklyEstimate(cfg) * Math.max(1, chips.filter(c => c.warmup_enabled).length)}</span>
           </div>
           <p className="w-full text-xs text-muted-foreground">
-            El volumen sube en escalones <b className="text-foreground">cada 3 horas</b> (más humano que el salto diario), desde el inicio hasta el tope del día {cfg.warmup_days ?? 7}. “Personalizado” = ajusta los campos de abajo a mano.
+            Flujo <b className="text-foreground">continuo</b> durante el día (tiempos aleatorios). Conversaciones/día por chip: <b className="text-foreground">{Array.from({ length: Math.min(7, Number(cfg.warmup_days ?? 7)) }, (_, i) => convTarget(cfg, i + 1)).join(' → ')}</b>. “Personalizado” = ajusta abajo.
           </p>
         </div>
 
@@ -395,14 +402,19 @@ export default function WarmupPage() {
                    onChange={e => setField('warmup_days', e.target.value)} />
           </div>
           <div>
-            <span className={label}>Mensajes/día inicio (rampa)</span>
-            <input type="number" min={1} className={input} value={cfg.ramp_start ?? 5}
-                   onChange={e => setField('ramp_start', e.target.value)} />
+            <span className={label}>Conversaciones/día (inicio)</span>
+            <input type="number" min={1} className={input} value={cfg.conv_start ?? 50}
+                   onChange={e => setField('conv_start', e.target.value)} />
           </div>
           <div>
-            <span className={label}>Mensajes/día final (rampa)</span>
-            <input type="number" min={1} className={input} value={cfg.ramp_end ?? 40}
-                   onChange={e => setField('ramp_end', e.target.value)} />
+            <span className={label}>Multiplicador diario (×)</span>
+            <input type="number" min={1} max={10} step={0.1} className={input} value={cfg.conv_growth ?? 2}
+                   onChange={e => setField('conv_growth', e.target.value)} />
+          </div>
+          <div>
+            <span className={label}>Tope conversaciones/día</span>
+            <input type="number" min={1} className={input} value={cfg.conv_cap ?? 200}
+                   onChange={e => setField('conv_cap', e.target.value)} />
           </div>
           <div>
             <span className={label}>Delay mínimo (seg)</span>
@@ -413,11 +425,6 @@ export default function WarmupPage() {
             <span className={label}>Delay máximo (seg)</span>
             <input type="number" min={10} className={input} value={cfg.delay_max_sec ?? 300}
                    onChange={e => setField('delay_max_sec', e.target.value)} />
-          </div>
-          <div>
-            <span className={label}>Tope diario por chip</span>
-            <input type="number" min={1} className={input} value={cfg.daily_cap ?? 50}
-                   onChange={e => setField('daily_cap', e.target.value)} />
           </div>
           <div>
             <span className={label}>Hora inicio</span>
@@ -441,11 +448,12 @@ export default function WarmupPage() {
             </select>
           </div>
           <div>
-            <span className={label}>Rampa</span>
-            <select className={input} value={cfg.ramp_mode ?? 'linear'} onChange={e => setField('ramp_mode', e.target.value)}>
-              <option value="linear">Lineal</option>
-              <option value="steps">Por escalones</option>
-            </select>
+            <span className={label}>Números externos</span>
+            <label className="mt-1 flex cursor-pointer items-center gap-2 rounded-xl bg-muted/60 px-3 py-2.5 text-sm">
+              <input type="checkbox" className="h-4 w-4 accent-jungle-green-600" checked={!!cfg.allow_external}
+                     onChange={e => setField('allow_external', e.target.checked)} />
+              Permitir conversar con externos
+            </label>
           </div>
           <div className="sm:col-span-2">
             <span className={label}>Días activos</span>
@@ -461,12 +469,21 @@ export default function WarmupPage() {
               })}
             </div>
           </div>
-          <div>
-            <span className={label}>% conversaciones internas ({Math.round((cfg.internal_ratio ?? 0.6) * 100)}%)</span>
-            <input type="range" min={0} max={100} className="mt-3 w-full accent-jungle-green-600"
-                   value={Math.round((cfg.internal_ratio ?? 0.6) * 100)}
-                   onChange={e => setField('internal_ratio', Number(e.target.value) / 100)} />
-          </div>
+          {cfg.allow_external ? (
+            <div>
+              <span className={label}>% conversaciones internas ({Math.round((cfg.internal_ratio ?? 0.6) * 100)}%)</span>
+              <input type="range" min={0} max={100} className="mt-3 w-full accent-jungle-green-600"
+                     value={Math.round((cfg.internal_ratio ?? 0.6) * 100)}
+                     onChange={e => setField('internal_ratio', Number(e.target.value) / 100)} />
+              <p className="mt-1 text-[11px] text-muted-foreground">El resto va a números externos.</p>
+            </div>
+          ) : (
+            <div className="sm:col-span-2 lg:col-span-3">
+              <p className="rounded-xl bg-jungle-green-50 px-3 py-2 text-xs text-jungle-green-700">
+                🔒 Solo conversaciones <b>entre tus chips activos</b> (más seguro). Activa “Permitir externos” para incluir contactos reales.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-5 border-t px-5 py-4">

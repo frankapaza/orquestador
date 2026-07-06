@@ -3,9 +3,14 @@ import { baileysManager } from '../baileys.manager.js'
 import { enqueueWarmupTurn } from './warmup.queue.js'
 import { varyText } from './catalog.seed.js'
 import {
-  getWarmupConfig, effectiveConfig, isActiveNow, rampTargetStepped,
-  sentTodayFor, getActiveConversations, randomDelayMs, recordWarmupSent, threadKeyFor,
+  getWarmupConfig, effectiveConfig, isActiveNow,
+  convTargetForDay, activeElapsedFraction, convSentTodayFor,
+  getActiveConversations, markConversationUsed, randomDelayMs,
+  recordWarmupSent, recordWarmupConv, threadKeyFor,
 } from './warmup.service.js'
+
+const MAX_CONV_PER_TICK = 6            // tope de conversaciones que un chip arranca por tick
+const TICK_SPREAD_MS     = 9 * 60000   // reparte los arranques dentro del tick (flujo continuo)
 
 const digits = p => (p ?? '').replace(/\D/g, '')
 const randInt = n => Math.floor(Math.random() * n)
@@ -17,22 +22,26 @@ function shuffle(arr) {
   return arr
 }
 
+// Largo variable de conversación: reproduce de 2 turnos hasta todos (a veces
+// termina antes) para que la cantidad de mensajes cambie entre conversaciones.
+function variableTurns(turns) {
+  if (!Array.isArray(turns) || turns.length <= 2) return turns || []
+  const k = 2 + randInt(turns.length - 1)  // 2..turns.length
+  return turns.slice(0, k)
+}
+
 // Día actual de calentamiento del chip. Inicializa started_at si es la 1ª vez.
 // Si ya superó warmup_days, marca el warmup como terminado y devuelve null.
 async function ensureWarmupDay(chip, cfg) {
   if (!chip.warmup_started_at) {
-    await sql`
-      UPDATE whatsapp_accounts SET warmup_started_at = now(), warmup_day = 1
-      WHERE id = ${chip.id}
-    `
-    chip.warmup_started_at = new Date().toISOString()  // reflejar para este mismo tick
+    await sql`UPDATE whatsapp_accounts SET warmup_started_at = now(), warmup_day = 1 WHERE id = ${chip.id}`
+    chip.warmup_started_at = new Date().toISOString()
     return 1
   }
-  const started  = new Date(chip.warmup_started_at)
-  const elapsed  = Math.floor((Date.now() - started.getTime()) / 86400000)
-  const day      = elapsed + 1
+  const started = new Date(chip.warmup_started_at)
+  const elapsed = Math.floor((Date.now() - started.getTime()) / 86400000)
+  const day     = elapsed + 1
   if (day > (cfg.warmup_days ?? 7)) {
-    // Calentamiento completado: se apaga solo.
     await sql`UPDATE whatsapp_accounts SET warmup_enabled = false WHERE id = ${chip.id}`
     return null
   }
@@ -54,61 +63,53 @@ async function pickExternalPhone(clientId) {
   return row?.phone ?? null
 }
 
-// Reproduce una conversación entre dos chips internos (ambos envían).
-async function playInternal(a, b, conv, cfg, budget) {
-  let delay = randomDelayMs(cfg)  // arranque escalonado
-  for (const turn of conv.turns) {
+// Reproduce una conversación entre dos chips internos (ambos envían). a y b son
+// filas de whatsapp_accounts. startOffset escalona el arranque dentro del tick.
+async function playInternal(a, b, conv, cfg, startOffset) {
+  const turns = variableTurns(conv.turns)
+  let delay = startOffset + randomDelayMs(cfg)
+  for (const turn of turns) {
     const isA = turn.from === 'a'
     const sender   = isA ? a : b
     const receiver = isA ? b : a
-    if (budget.get(sender.chip.id) <= 0) continue
-
     await enqueueWarmupTurn({
-      fromInstance:   sender.chip.instance_name,
-      fromAccountId:  sender.chip.id,
-      toPhone:        digits(receiver.chip.phone_number),
+      fromInstance:   sender.instance_name,
+      fromAccountId:  sender.id,
+      toPhone:        digits(receiver.phone_number),
       text:           varyText(turn.text),
       simulateTyping: cfg.simulate_typing !== false,
       markRead:       cfg.mark_read !== false,
-      // Datos para el visor de chat:
-      peerPhone:      digits(receiver.chip.phone_number),
-      peerName:       receiver.chip.name,
-      toAccountId:    receiver.chip.id,
+      peerPhone:      digits(receiver.phone_number),
+      peerName:       receiver.name,
+      toAccountId:    receiver.id,
       peerKind:       'internal',
-      threadKey:      threadKeyFor(sender.chip.phone_number, receiver.chip.phone_number),
+      threadKey:      threadKeyFor(sender.phone_number, receiver.phone_number),
     }, delay)
-
-    // Contar al encolar (no al enviar) para no sobre-encolar entre ticks.
-    await recordWarmupSent(sender.chip.id)
-    budget.set(sender.chip.id, budget.get(sender.chip.id) - 1)
+    await recordWarmupSent(sender.id)
     delay += randomDelayMs(cfg)
   }
 }
 
 // Reproduce solo los turnos salientes hacia un número externo real.
-async function playExternal(a, phone, conv, cfg, budget) {
-  let delay = randomDelayMs(cfg)
-  for (const turn of conv.turns) {
+async function playExternal(a, phone, conv, cfg, startOffset) {
+  const turns = variableTurns(conv.turns)
+  let delay = startOffset + randomDelayMs(cfg)
+  for (const turn of turns) {
     if (turn.from !== 'a') continue
-    if (budget.get(a.chip.id) <= 0) break
-
     await enqueueWarmupTurn({
-      fromInstance:   a.chip.instance_name,
-      fromAccountId:  a.chip.id,
+      fromInstance:   a.instance_name,
+      fromAccountId:  a.id,
       toPhone:        digits(phone),
       text:           varyText(turn.text),
       simulateTyping: cfg.simulate_typing !== false,
       markRead:       cfg.mark_read !== false,
-      // Datos para el visor de chat:
       peerPhone:      digits(phone),
       peerName:       null,
       toAccountId:    null,
       peerKind:       'external',
-      threadKey:      threadKeyFor(a.chip.phone_number, phone),
+      threadKey:      threadKeyFor(a.phone_number, phone),
     }, delay)
-
-    await recordWarmupSent(a.chip.id)
-    budget.set(a.chip.id, budget.get(a.chip.id) - 1)
+    await recordWarmupSent(a.id)
     delay += randomDelayMs(cfg)
   }
 }
@@ -126,48 +127,55 @@ async function tickClient(clientId) {
   chips = chips.filter(c => baileysManager.getStatus(c.instance_name) === 'connected')
   if (!chips.length) return
 
-  const convs = await getActiveConversations(clientId)
+  const convs = await getActiveConversations(clientId)  // ordenadas por menos usadas (rotación)
   if (!convs.length) return
 
-  // Presupuesto restante de mensajes por chip para hoy.
-  const budget = new Map()
+  // Presupuesto en CONVERSACIONES por chip, liberado en FLUJO CONTINUO según cuánto
+  // de la ventana activa ha transcurrido hoy.
+  const now  = new Date()
+  const frac = activeElapsedFraction(cfg, now)
+
   const eligible = []
   for (const c of chips) {
     const ecfg = effectiveConfig(cfg, c)
     const day  = await ensureWarmupDay(c, ecfg)
     if (day == null) continue
-    // Objetivo que sube cada 3 horas (rampTargetStepped ya aplica el daily_cap).
-    const target = rampTargetStepped(ecfg, c.warmup_started_at)
-    const sent   = await sentTodayFor(c.id)
-    const remaining = target - sent
-    if (remaining > 0) {
-      budget.set(c.id, remaining)
-      eligible.push({ chip: c, ecfg })
-    }
+    const dailyConv  = convTargetForDay(ecfg, day)
+    const allowedNow = Math.max(1, Math.ceil(dailyConv * frac))
+    const sent       = await convSentTodayFor(c.id)
+    const remaining  = allowedNow - sent
+    if (remaining > 0) eligible.push({ chip: c, ecfg, remaining })
   }
   if (!eligible.length) return
 
-  // Emparejar y arrancar una conversación por chip disponible este tick.
+  let ci = 0
+  const nextConv = () => convs[(ci++) % convs.length]
+
   shuffle(eligible)
-  const used = new Set()
   for (const e of eligible) {
-    if (used.has(e.chip.id) || budget.get(e.chip.id) <= 0) continue
-    const conv = convs[randInt(convs.length)]
-    const goInternal = Math.random() < (e.ecfg.internal_ratio ?? 0.6)
+    const cfgE          = e.ecfg
+    const allowExternal = cfgE.allow_external === true
+    const others        = chips.filter(c => c.id !== e.chip.id)  // otros chips activos (para internas)
+    const n = Math.min(e.remaining, MAX_CONV_PER_TICK)
 
-    let partner = null
-    if (goInternal) {
-      partner = eligible.find(x => !used.has(x.chip.id) && x.chip.id !== e.chip.id && budget.get(x.chip.id) > 0)
-    }
+    for (let i = 0; i < n; i++) {
+      // Interno por defecto; externo solo si está permitido (según internal_ratio).
+      const goInternal = !allowExternal || Math.random() < (cfgE.internal_ratio ?? 0.6)
+      const conv = nextConv()
+      await markConversationUsed(conv.id).catch(() => {})
+      const startOffset = randInt(TICK_SPREAD_MS)
 
-    if (partner) {
-      used.add(e.chip.id); used.add(partner.chip.id)
-      await playInternal(e, partner, conv, e.ecfg, budget)
-    } else {
-      const phone = await pickExternalPhone(clientId)
-      if (!phone) continue
-      used.add(e.chip.id)
-      await playExternal(e, phone, conv, e.ecfg, budget)
+      if (goInternal && others.length) {
+        const partner = others[randInt(others.length)]
+        await playInternal(e.chip, partner, conv, cfgE, startOffset)
+        await recordWarmupConv(e.chip.id)
+      } else if (allowExternal) {
+        const phone = await pickExternalPhone(clientId)
+        if (!phone) continue
+        await playExternal(e.chip, phone, conv, cfgE, startOffset)
+        await recordWarmupConv(e.chip.id)
+      }
+      // Si es interno pero no hay otro chip (solo 1 activo) y externos apagados: nada.
     }
   }
 }
