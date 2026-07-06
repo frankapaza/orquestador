@@ -57,6 +57,36 @@ export async function processIncoming({ clientId, channel, accountId, accountTyp
   return { conv, msg }
 }
 
+// Guarda un mensaje SALIENTE que el usuario escribió desde el CELULAR (no desde
+// la plataforma). Dedup por external_id (evita duplicar los enviados desde la
+// plataforma, que llegan con el mismo id). NO incrementa no-leídos (es nuestro).
+export async function processOutgoingFromDevice({ clientId, channel, accountId, accountType, contactPhone, contactName, body, mediaUrl, mediaType, externalId }) {
+  if (externalId) {
+    const [exist] = await sql`SELECT id FROM messages WHERE client_id = ${clientId} AND external_id = ${externalId} LIMIT 1`
+    if (exist) return null   // ya guardado (enviado desde la plataforma)
+  }
+
+  const [conv] = await sql`
+    INSERT INTO conversations
+      (client_id, channel, contact_phone, contact_name, account_id, account_type, last_message_at)
+    VALUES
+      (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, now())
+    ON CONFLICT (client_id, channel, contact_phone, account_id)
+    DO UPDATE SET
+      last_message_at = now(),
+      contact_name    = COALESCE(EXCLUDED.contact_name, conversations.contact_name)
+    RETURNING *
+  `
+  const msg = await saveMessage({
+    clientId, conversationId: conv.id, channel,
+    direction: 'outbound', to: contactPhone,
+    body, mediaUrl, mediaType, externalId, status: 'sent',
+  })
+
+  bus.emit(clientId, { type: 'message:new', conversation_id: conv.id, message: msg, channel })
+  return { conv, msg }
+}
+
 export async function updateMessageStatus(clientId, externalId, status) {
   const updates = { status }
   if (status === 'delivered') updates.delivered_at = new Date()

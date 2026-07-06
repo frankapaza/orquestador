@@ -13,7 +13,7 @@ import { mkdirSync, existsSync, rmSync, readFileSync, writeFileSync } from 'fs'
 import crypto from 'crypto'
 import pino from 'pino'
 import { sql } from '../../lib/db.js'
-import { processIncoming, updateMessageStatus } from '../channels/message.service.js'
+import { processIncoming, processOutgoingFromDevice, updateMessageStatus } from '../channels/message.service.js'
 import { bus } from '../../lib/eventBus.js'
 import { internalAccountsByPhone, recordWarmupReceived } from './warmup/warmup.service.js'
 import { createAlert } from './warmup/alerts.service.js'
@@ -68,6 +68,18 @@ class BaileysManager {
     this.sessions = new Map()
     // instanceName → pairingCode string temporal
     this.pairingCodes = new Map()
+    // IDs de mensajes enviados por el warmup, para NO guardarlos como mensajes
+    // del celular en el inbox (el eco fromMe llega por messages.upsert).
+    this.warmupSentIds = new Set()
+  }
+
+  _noteWarmupId(id) {
+    if (!id) return
+    this.warmupSentIds.add(id)
+    if (this.warmupSentIds.size > 5000) {
+      const it = this.warmupSentIds.values()
+      for (let i = 0; i < 1000; i++) this.warmupSentIds.delete(it.next().value)
+    }
   }
 
   sessionDir(name) {
@@ -270,34 +282,51 @@ class BaileysManager {
       const internal = await internalAccountsByPhone(acc.client_id).catch(() => new Map())
       const onlyDigits = p => (p ?? '').replace(/\D/g, '')
 
+      const getBody = mm => mm.message?.conversation
+                ?? mm.message?.extendedTextMessage?.text
+                ?? mm.message?.imageMessage?.caption
+                ?? mm.message?.videoMessage?.caption
+                ?? mm.message?.documentMessage?.caption
+                ?? null
+
       for (const m of messages) {
-        if (m.key.fromMe || isJidBroadcast(m.key.remoteJid ?? '')) continue
+        const remoteJid = m.key.remoteJid ?? ''
+        // Ignorar difusiones, GRUPOS (@g.us) y newsletters/canales (@newsletter):
+        // sus JID no son teléfonos y ensucian el inbox con "números" raros.
+        if (isJidBroadcast(remoteJid) || remoteJid.endsWith('@g.us') || remoteJid.endsWith('@newsletter') || remoteJid.endsWith('@broadcast')) continue
 
         // Resolver número real (maneja @s.whatsapp.net y @lid)
-        const contactPhone = this.resolvePhone(m.key.remoteJid, name)
+        const contactPhone = this.resolvePhone(remoteJid, name)
         if (!contactPhone) continue
+        const peerInternal = internal.get(onlyDigits(contactPhone))
 
+        // ── Salientes (escritos desde el CELULAR o la plataforma) ──────────────
+        if (m.key.fromMe) {
+          if (this.warmupSentIds.has(m.key.id)) continue               // tráfico de warmup
+          if (peerInternal && peerInternal.instance_name !== name) continue  // chip-a-chip interno
+          const { mediaUrl, mediaType } = await saveIncomingMedia(m, sock, silentLogger)
+          await processOutgoingFromDevice({
+            clientId: acc.client_id, channel: 'whatsapp',
+            accountId: acc.id, accountType: 'whatsapp',
+            contactPhone, contactName: null,
+            body: getBody(m), mediaUrl, mediaType, externalId: m.key.id,
+          }).catch(e => console.error('[Baileys] processOutgoingFromDevice:', e.message))
+          continue
+        }
+
+        // ── Entrantes ──────────────────────────────────────────────────────────
         // Tráfico de calentamiento entre chips internos: contar y saltar el inbox.
-        const fromInternal = internal.get(onlyDigits(contactPhone))
-        if (fromInternal && fromInternal.instance_name !== name) {
+        if (peerInternal && peerInternal.instance_name !== name) {
           await recordWarmupReceived(acc.id).catch(() => {})
           continue
         }
 
-        const body = m.message?.conversation
-                  ?? m.message?.extendedTextMessage?.text
-                  ?? m.message?.imageMessage?.caption
-                  ?? m.message?.videoMessage?.caption
-                  ?? m.message?.documentMessage?.caption
-                  ?? null
-
         const { mediaUrl, mediaType } = await saveIncomingMedia(m, sock, silentLogger)
-
         await processIncoming({
           clientId: acc.client_id, channel: 'whatsapp',
           accountId: acc.id, accountType: 'whatsapp',
           contactPhone, contactName: m.pushName ?? null,
-          body, mediaUrl, mediaType, externalId: m.key.id,
+          body: getBody(m), mediaUrl, mediaType, externalId: m.key.id,
         })
       }
     })
@@ -463,6 +492,7 @@ class BaileysManager {
     } catch {}
 
     const sent = await sock.sendMessage(jid, { text })
+    this._noteWarmupId(sent?.key?.id)   // excluir del inbox (es tráfico de warmup)
     return { id: sent?.key?.id }
   }
 
