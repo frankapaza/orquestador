@@ -86,6 +86,7 @@ export default function WarmupPage() {
   const activeThreadRef = useRef(null)
   const nextConvRef     = useRef(null)
   const lastRefreshRef  = useRef(0)
+  const threadScrollRef = useRef(null)  // contenedor de burbujas → auto-scroll al final
   useEffect(() => { activeThreadRef.current = activeThread }, [activeThread])
   useEffect(() => { nextConvRef.current = nextConv }, [nextConv])
 
@@ -171,6 +172,13 @@ export default function WarmupPage() {
       .then(r => { if (alive) setThreadMsgs(r.data) }).catch(() => {})
     return () => { alive = false }
   }, [activeThread])
+
+  // Auto-scroll al último mensaje: al abrir un hilo o al llegar mensajes nuevos,
+  // el chat se posiciona abajo (lo más reciente) sin que el usuario baje a mano.
+  useEffect(() => {
+    const el = threadScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [threadMsgs, activeThread])
 
   function flash(type, text) {
     setMsg({ type, text })
@@ -602,7 +610,7 @@ export default function WarmupPage() {
               ))}
             </ul>
             {/* Burbujas del hilo activo */}
-            <div className="max-h-96 space-y-2 overflow-y-auto p-4">
+            <div ref={threadScrollRef} className="max-h-96 space-y-2 overflow-y-auto p-4">
               {!activeThread ? (
                 <p className="pt-8 text-center text-sm text-muted-foreground">Elige una conversación para verla.</p>
               ) : threadMsgs.length === 0 ? (

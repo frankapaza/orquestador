@@ -33,6 +33,15 @@ export async function saveMessage({ clientId, conversationId, channel, direction
 }
 
 export async function processIncoming({ clientId, channel, accountId, accountType, contactPhone, contactName, body, mediaUrl, mediaType, externalId, isGroup = false }) {
+  // Dedup por external_id (id global del mensaje de WhatsApp). Si el MISMO mensaje
+  // llega a varias sesiones Baileys que comparten la cuenta (mismo número vinculado
+  // en varios chips), sin esto se duplicaría en la conversación de cada chip.
+  // No incrementa no-leídos ni bumpea la conversación en el duplicado.
+  if (externalId) {
+    const [exist] = await sql`SELECT id FROM messages WHERE client_id = ${clientId} AND external_id = ${externalId} LIMIT 1`
+    if (exist) return null
+  }
+
   const conv = await upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType, isGroup })
   const msg  = await saveMessage({
     clientId, conversationId: conv.id, channel,

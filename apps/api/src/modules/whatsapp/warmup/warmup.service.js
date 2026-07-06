@@ -155,11 +155,15 @@ const digits = p => (p ?? '').replace(/\D/g, '')
 
 // Devuelve Map<digitsPhone, account> de los chips del cliente (para saber si un
 // mensaje entrante proviene de otro chip del sistema → tráfico de warmup).
+// Solo cuentan los chips CONECTADOS: si un número se desvinculó de WhatsApp deja
+// de ser un chip interno y pasa a tratarse como contacto externo normal (sus
+// mensajes deben entrar al inbox, no ocultarse como tráfico de calentamiento).
 export async function internalAccountsByPhone(clientId) {
   const accounts = await sql`
     SELECT id, instance_name, phone_number, warmup_enabled
     FROM whatsapp_accounts
-    WHERE client_id = ${clientId} AND provider = 'baileys' AND phone_number IS NOT NULL
+    WHERE client_id = ${clientId} AND provider = 'baileys'
+      AND phone_number IS NOT NULL AND is_connected = true
   `
   const map = new Map()
   for (const a of accounts) map.set(digits(a.phone_number), a)
