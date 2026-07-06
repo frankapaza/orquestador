@@ -193,6 +193,30 @@ export async function smsRoutes(fastify) {
     }
   })
 
+  // Registrar / reintentar el webhook de SMS entrante en el gateway (NO silencioso,
+  // a diferencia del registro automático al crear/editar). Devuelve la URL que quedó
+  // registrada y el listado actual del gateway → sirve para diagnosticar por qué no
+  // llegan SMS entrantes (URL apuntando a localhost, gateway offline, credenciales, etc.).
+  fastify.post('/sms/accounts/:id/webhook/register', { onRequest: pre }, async (req, reply) => {
+    if (req.user.member_id) return reply.code(403).send({ error: 'Solo el administrador puede registrar el webhook' })
+
+    const [account] = await sql`
+      SELECT id, gateway_url, api_key FROM sms_accounts
+      WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
+
+    const url = webhookUrlFor(account.id)
+    const adapter = new AndroidSmsAdapter(account)
+    try {
+      const webhook    = await adapter.registerWebhook(url, 'sms:received')
+      const registered = await adapter.listWebhooks().catch(() => [])
+      return { ok: true, url, webhook, registered }
+    } catch (err) {
+      return reply.code(502).send({ ok: false, url, error: err.message, status: err.status ?? null })
+    }
+  })
+
   // Enviar SMS puntual
   fastify.post('/sms/send', { onRequest: pre }, async (req, reply) => {
     const body = z.object({

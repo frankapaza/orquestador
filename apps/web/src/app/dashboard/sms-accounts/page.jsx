@@ -72,6 +72,8 @@ export default function SmsAccountsPage() {
   const [error, setError]             = useState(null)
   const [pinging, setPinging]         = useState(null)
   const [pingResult, setPingResult]   = useState({})
+  const [whBusy, setWhBusy]           = useState(null)
+  const [whResult, setWhResult]       = useState({})
   const [showWebhook, setShowWebhook] = useState(false)
   const [assigningId, setAssigningId] = useState(null)
 
@@ -156,6 +158,20 @@ export default function SmsAccountsPage() {
       setPingResult(prev => ({ ...prev, [id]: false }))
     } finally {
       setPinging(null)
+    }
+  }
+
+  async function registerWebhook(id) {
+    setWhBusy(id)
+    setWhResult(r => ({ ...r, [id]: null }))
+    try {
+      const r = await api.post(`/sms/accounts/${id}/webhook/register`)
+      setWhResult(prev => ({ ...prev, [id]: { ok: true, url: r.data.url } }))
+    } catch (err) {
+      const d = err.response?.data
+      setWhResult(prev => ({ ...prev, [id]: { ok: false, url: d?.url, error: d?.error ?? 'No se pudo registrar el webhook' } }))
+    } finally {
+      setWhBusy(null)
     }
   }
 
@@ -442,10 +458,26 @@ export default function SmsAccountsPage() {
                 </div>
               )}
 
+              {/* Resultado del registro de webhook (muestra la URL real que quedó
+                  registrada en el gateway → si sale localhost, TRACKING_BASE_URL está mal) */}
+              {whResult[acc.id] && (
+                <div className={`mx-5 mb-3 rounded-lg px-3 py-2 text-xs ${whResult[acc.id].ok ? 'border border-jungle-green-200 bg-jungle-green-50 text-jungle-green-700' : 'border border-red-200 bg-red-50 text-red-700'}`}>
+                  <p className="flex items-start gap-1.5">
+                    {whResult[acc.id].ok
+                      ? <><CheckCircle size={14} className="mt-0.5 shrink-0" /> Webhook registrado en el gateway</>
+                      : <><XCircle size={14} className="mt-0.5 shrink-0" /> {whResult[acc.id].error}</>}
+                  </p>
+                  {whResult[acc.id].url && <p className="mt-1 break-all font-mono text-[11px] opacity-80">{whResult[acc.id].url}</p>}
+                </div>
+              )}
+
               {/* Acciones */}
               <div className="mt-auto space-y-2 border-t bg-muted/20 p-4">
                 <Button variant="outline" size="sm" className="w-full" onClick={() => ping(acc.id)} disabled={pinging === acc.id}>
                   {pinging === acc.id ? <><Loader2 size={14} className="animate-spin" /> Verificando...</> : <><RefreshCw size={14} /> Verificar conexión</>}
+                </Button>
+                <Button variant="outline" size="sm" className="w-full" onClick={() => registerWebhook(acc.id)} disabled={whBusy === acc.id}>
+                  {whBusy === acc.id ? <><Loader2 size={14} className="animate-spin" /> Registrando...</> : <><Webhook size={14} /> Registrar webhook entrante</>}
                 </Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="flex-1" onClick={() => openEdit(acc)}>
