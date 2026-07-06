@@ -2,12 +2,12 @@ import { sql } from '../../lib/db.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
 import { bus } from '../../lib/eventBus.js'
 
-export async function upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType }) {
+export async function upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType, isGroup = false }) {
   const [conv] = await sql`
     INSERT INTO conversations
-      (client_id, channel, contact_phone, contact_name, account_id, account_type, last_message_at)
+      (client_id, channel, contact_phone, contact_name, account_id, account_type, is_group, last_message_at)
     VALUES
-      (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, now())
+      (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, ${isGroup}, now())
     ON CONFLICT (client_id, channel, contact_phone, account_id)
     DO UPDATE SET
       last_message_at = now(),
@@ -32,8 +32,8 @@ export async function saveMessage({ clientId, conversationId, channel, direction
   return msg
 }
 
-export async function processIncoming({ clientId, channel, accountId, accountType, contactPhone, contactName, body, mediaUrl, mediaType, externalId }) {
-  const conv = await upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType })
+export async function processIncoming({ clientId, channel, accountId, accountType, contactPhone, contactName, body, mediaUrl, mediaType, externalId, isGroup = false }) {
+  const conv = await upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType, isGroup })
   const msg  = await saveMessage({
     clientId, conversationId: conv.id, channel,
     direction: 'inbound', from: contactPhone,
@@ -60,7 +60,7 @@ export async function processIncoming({ clientId, channel, accountId, accountTyp
 // Guarda un mensaje SALIENTE que el usuario escribió desde el CELULAR (no desde
 // la plataforma). Dedup por external_id (evita duplicar los enviados desde la
 // plataforma, que llegan con el mismo id). NO incrementa no-leídos (es nuestro).
-export async function processOutgoingFromDevice({ clientId, channel, accountId, accountType, contactPhone, contactName, body, mediaUrl, mediaType, externalId }) {
+export async function processOutgoingFromDevice({ clientId, channel, accountId, accountType, contactPhone, contactName, body, mediaUrl, mediaType, externalId, isGroup = false }) {
   if (externalId) {
     const [exist] = await sql`SELECT id FROM messages WHERE client_id = ${clientId} AND external_id = ${externalId} LIMIT 1`
     if (exist) return null   // ya guardado (enviado desde la plataforma)
@@ -68,9 +68,9 @@ export async function processOutgoingFromDevice({ clientId, channel, accountId, 
 
   const [conv] = await sql`
     INSERT INTO conversations
-      (client_id, channel, contact_phone, contact_name, account_id, account_type, last_message_at)
+      (client_id, channel, contact_phone, contact_name, account_id, account_type, is_group, last_message_at)
     VALUES
-      (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, now())
+      (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, ${isGroup}, now())
     ON CONFLICT (client_id, channel, contact_phone, account_id)
     DO UPDATE SET
       last_message_at = now(),

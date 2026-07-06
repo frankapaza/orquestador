@@ -71,6 +71,20 @@ class BaileysManager {
     // IDs de mensajes enviados por el warmup, para NO guardarlos como mensajes
     // del celular en el inbox (el eco fromMe llega por messages.upsert).
     this.warmupSentIds = new Set()
+    // Caché de nombres de grupos (jid → asunto) para no pedir metadata cada vez.
+    this.groupNames = new Map()
+  }
+
+  // Nombre (asunto) de un grupo, cacheado. Fallback si WhatsApp no lo da.
+  async groupName(sock, jid) {
+    if (this.groupNames.has(jid)) return this.groupNames.get(jid)
+    let subject = 'Grupo'
+    try {
+      const meta = await sock.groupMetadata(jid)
+      if (meta?.subject) subject = meta.subject
+    } catch {}
+    this.groupNames.set(jid, subject)
+    return subject
   }
 
   _noteWarmupId(id) {
@@ -291,14 +305,21 @@ class BaileysManager {
 
       for (const m of messages) {
         const remoteJid = m.key.remoteJid ?? ''
-        // Ignorar difusiones, GRUPOS (@g.us) y newsletters/canales (@newsletter):
-        // sus JID no son teléfonos y ensucian el inbox con "números" raros.
-        if (isJidBroadcast(remoteJid) || remoteJid.endsWith('@g.us') || remoteJid.endsWith('@newsletter') || remoteJid.endsWith('@broadcast')) continue
+        // Difusiones/estados y newsletters/canales fuera (no son conversaciones).
+        if (isJidBroadcast(remoteJid) || remoteJid.endsWith('@newsletter') || remoteJid.endsWith('@broadcast') || remoteJid === 'status@broadcast') continue
 
-        // Resolver número real (maneja @s.whatsapp.net y @lid)
-        const contactPhone = this.resolvePhone(remoteJid, name)
+        const isGroup = remoteJid.endsWith('@g.us')
+        let contactPhone, contactName
+        if (isGroup) {
+          // Grupo: guardar con su NOMBRE (asunto) en vez del JID largo.
+          contactPhone = '+' + onlyDigits(remoteJid)
+          contactName  = await this.groupName(sock, remoteJid)
+        } else {
+          contactPhone = this.resolvePhone(remoteJid, name)
+          contactName  = m.pushName ?? null
+        }
         if (!contactPhone) continue
-        const peerInternal = internal.get(onlyDigits(contactPhone))
+        const peerInternal = isGroup ? null : internal.get(onlyDigits(contactPhone))
 
         // ── Salientes (escritos desde el CELULAR o la plataforma) ──────────────
         if (m.key.fromMe) {
@@ -308,7 +329,7 @@ class BaileysManager {
           await processOutgoingFromDevice({
             clientId: acc.client_id, channel: 'whatsapp',
             accountId: acc.id, accountType: 'whatsapp',
-            contactPhone, contactName: null,
+            contactPhone, contactName: isGroup ? contactName : null, isGroup,
             body: getBody(m), mediaUrl, mediaType, externalId: m.key.id,
           }).catch(e => console.error('[Baileys] processOutgoingFromDevice:', e.message))
           continue
@@ -325,7 +346,7 @@ class BaileysManager {
         await processIncoming({
           clientId: acc.client_id, channel: 'whatsapp',
           accountId: acc.id, accountType: 'whatsapp',
-          contactPhone, contactName: m.pushName ?? null,
+          contactPhone, contactName, isGroup,
           body: getBody(m), mediaUrl, mediaType, externalId: m.key.id,
         })
       }

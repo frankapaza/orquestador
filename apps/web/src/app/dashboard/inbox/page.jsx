@@ -368,10 +368,16 @@ function ContactPanel({ conversation, messages, onNewMessage, onClose }) {
         <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-jungle-green-600 text-2xl font-bold text-white shadow-lg shadow-jungle-green-600/20">
           {initials(name, conversation.contact_phone)}
         </div>
-        <p className="font-semibold text-foreground">{name || conversation.contact_phone}</p>
+        <p className="font-semibold text-foreground">{name || (conversation.is_group ? 'Grupo' : conversation.contact_phone)}</p>
         <div className="mt-1 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
-          {convCountry && <Flag code={convCountry.code} className="h-3 w-4" />}
-          <span className="font-mono">{conversation.contact_phone}</span>
+          {conversation.is_group ? (
+            <span className="inline-flex items-center gap-1">👥 Grupo</span>
+          ) : (
+            <>
+              {convCountry && <Flag code={convCountry.code} className="h-3 w-4" />}
+              <span className="font-mono">{conversation.contact_phone}</span>
+            </>
+          )}
         </div>
         <div className="mt-2.5 flex items-center justify-center gap-2">
           <ChannelBadge channel={conversation.channel} />
@@ -947,9 +953,9 @@ export default function InboxPage() {
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar name={selected.contact_name} phone={selected.contact_phone} channel={selected.channel} size="sm" />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-foreground">{selected.contact_name ?? selected.contact_phone}</p>
+                  <p className="truncate text-sm font-semibold text-foreground">{selected.contact_name ?? (selected.is_group ? 'Grupo' : selected.contact_phone)}</p>
                   <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                    <span className="font-mono">{selected.contact_phone}</span>
+                    <span className="font-mono">{selected.is_group ? '👥 Grupo' : selected.contact_phone}</span>
                     {selected.account_name && <span className="flex items-center gap-1"><PhoneCall size={10} /> vía {selected.account_name}</span>}
                     {selected.channel === 'whatsapp' && <PresenceLabel presence={presence} />}
                   </div>
