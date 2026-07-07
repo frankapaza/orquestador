@@ -24,7 +24,6 @@
     "dotenv": "^16.4.5",
     "fastify": "^4.28.1",
     "fastify-plugin": "^5.1.0",
-    "https-proxy-agent": "^9.1.0",
     "imapflow": "^1.0.164",
     "ioredis": "^5.4.1",
     "mailparser": "^3.7.1",
@@ -36,7 +35,6 @@
     "pino-pretty": "^11.2.2",
     "postgres": "^3.4.4",
     "qrcode": "^1.5.4",
-    "socks-proxy-agent": "^10.1.0",
     "xlsx": "^0.18.5",
     "zod": "^3.23.8"
   },

@@ -7,8 +7,6 @@ import makeWASocket, {
   downloadMediaMessage,
 } from '@whiskeysockets/baileys'
 import QRCode from 'qrcode'
-import { SocksProxyAgent } from 'socks-proxy-agent'
-import { HttpsProxyAgent } from 'https-proxy-agent'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { mkdirSync, existsSync, rmSync, readFileSync, writeFileSync } from 'fs'
@@ -26,21 +24,6 @@ if (!existsSync(SESSIONS_DIR)) mkdirSync(SESSIONS_DIR, { recursive: true })
 
 const UPLOADS_DIR = join(__dirname, '..', '..', '..', 'uploads')
 if (!existsSync(UPLOADS_DIR)) mkdirSync(UPLOADS_DIR, { recursive: true })
-
-// Construye el agente de proxy para una sesión a partir de la proxy_url de la
-// cuenta (socks5://user:pass@host:port o http(s)://...). Sin proxy → null
-// (conexión directa por la IP del servidor, comportamiento anterior).
-function proxyAgentFor(proxyUrl) {
-  if (!proxyUrl) return null
-  try {
-    return proxyUrl.startsWith('socks')
-      ? new SocksProxyAgent(proxyUrl)
-      : new HttpsProxyAgent(proxyUrl)
-  } catch (e) {
-    console.error('[Baileys] proxy_url inválida, se ignora:', e.message)
-    return null
-  }
-}
 
 const MIME_TO_EXT = {
   'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png',
@@ -169,11 +152,6 @@ class BaileysManager {
     const { state, saveCreds } = await useMultiFileAuthState(dir)
     const { version } = await fetchLatestBaileysVersion()
 
-    // Proxy por celular: si la cuenta tiene proxy_url, todo el tráfico de esta
-    // sesión (socket + descarga/subida de media) sale por ese proxy.
-    const proxyAgent = proxyAgentFor(account.proxy_url)
-    if (proxyAgent) console.log(`[Baileys][${name}] conectando a través de proxy (${account.proxy_provider ?? 'proxy'})`)
-
     const sock = makeWASocket({
       version,
       auth: {
@@ -186,7 +164,6 @@ class BaileysManager {
       generateHighQualityLinkPreview: false,
       syncFullHistory:              false,
       markOnlineOnConnect:          false,
-      ...(proxyAgent ? { agent: proxyAgent, fetchAgent: proxyAgent } : {}),
       // Usar código de emparejamiento si se solicita
       ...(usePairingCode ? { mobile: false } : {}),
     })

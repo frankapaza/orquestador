@@ -116,8 +116,6 @@ export async function whatsappRoutes(fastify) {
       active_hours_end:   z.string().optional(),
       role:               z.enum(['advisor', 'campaign']).optional(),
       is_active:          z.boolean().optional(),
-      proxy_provider:     z.enum(['none', 'iproxy', 'proxidize']).optional(),
-      proxy_url:          z.string().max(500).optional(),
     })
     const body = schema.parse(req.body)
     if (!Object.keys(body).length) return reply.code(400).send({ error: 'Nada que actualizar' })
@@ -129,13 +127,6 @@ export async function whatsappRoutes(fastify) {
       RETURNING *
     `
     if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
-
-    // Si cambió el proxy de una cuenta Baileys, reiniciar la sesión (sin borrar
-    // credenciales) para que reconecte a través del nuevo proxy.
-    if ((('proxy_url' in body) || ('proxy_provider' in body)) && account.provider === 'baileys') {
-      await baileysManager.stopSession(account.instance_name).catch(() => {})
-      baileysManager.startSession(account).catch(() => {})
-    }
     return account
   })
 
