@@ -169,18 +169,26 @@ async function tickClient(clientId) {
       const startOffset = randInt(TICK_SPREAD_MS)
 
       // ── Día 1: el chip nuevo SOLO responde (un chip más maduro inicia) y con el
-      // intervalo más largo. Sin externos. Si no hay chip más maduro, se salta.
+      // intervalo más largo del día 1. Sin externos.
       if (isDay1) {
+        const factor = delayFactorForDay(cfg, 1)
         const mature = others.filter(o => dayOf(o) > 1)
-        if (!mature.length) continue
-        const partner = mature[randInt(mature.length)]
-        const factor  = delayFactorForDay(cfg, 1)
-        // Asignar roles para que el chip NUEVO nunca envíe el primer turno:
-        // el que envía primero (turns[0].from) debe ser el chip maduro.
-        const firstSender = conv.turns?.[0]?.from ?? 'a'
-        const [pa, pb] = firstSender === 'a' ? [partner, e.chip] : [e.chip, partner]
-        await playInternal(pa, pb, conv, cfgE, startOffset, factor)
-        await recordWarmupConv(e.chip.id)
+        if (mature.length) {
+          // Normal: un chip más maduro inicia y el nuevo responde. Se asignan roles
+          // para que el chip NUEVO nunca envíe el primer turno (turns[0].from).
+          const partner = mature[randInt(mature.length)]
+          const firstSender = conv.turns?.[0]?.from ?? 'a'
+          const [pa, pb] = firstSender === 'a' ? [partner, e.chip] : [e.chip, partner]
+          await playInternal(pa, pb, conv, cfgE, startOffset, factor)
+          await recordWarmupConv(e.chip.id)
+        } else if (others.length) {
+          // ARRANQUE SEMILLA: no hay ningún chip más maduro (p.ej. todos arrancan en
+          // día 1 a la vez). Para no estancar el warmup, este chip SÍ inicia con otro
+          // chip nuevo, pero manteniendo el intervalo lento del día 1.
+          const partner = others[randInt(others.length)]
+          await playInternal(e.chip, partner, conv, cfgE, startOffset, factor)
+          await recordWarmupConv(e.chip.id)
+        }
         continue
       }
 
