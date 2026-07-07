@@ -167,6 +167,45 @@ export async function settingsRoutes(fastify) {
     return { deleted: true }
   })
 
+  // ── PROXIES (anti-baneo) ────────────────────────────────────────────────────
+  // Proveedores habilitados + configuración de proxy por celular Baileys.
+
+  fastify.get('/settings/proxies', auth, async (req, reply) => {
+    if (req.user.member_id) return reply.code(403).send({ error: 'Solo el administrador' })
+    const [c] = await sql`
+      SELECT proxy_iproxy_enabled, proxy_proxidize_enabled FROM clients WHERE id = ${req.user.sub}
+    `
+    const accounts = await sql`
+      SELECT id, name, phone_number, proxy_provider, proxy_url, is_connected
+      FROM whatsapp_accounts
+      WHERE client_id = ${req.user.sub} AND provider = 'baileys'
+      ORDER BY created_at DESC
+    `
+    return {
+      iproxy_enabled:    !!c?.proxy_iproxy_enabled,
+      proxidize_enabled: !!c?.proxy_proxidize_enabled,
+      accounts,
+    }
+  })
+
+  fastify.put('/settings/proxies', auth, async (req, reply) => {
+    if (req.user.member_id) return reply.code(403).send({ error: 'Solo el administrador' })
+    const body = z.object({
+      iproxy_enabled:    z.boolean().optional(),
+      proxidize_enabled: z.boolean().optional(),
+    }).parse(req.body)
+
+    const [c] = await sql`
+      UPDATE clients SET
+        proxy_iproxy_enabled    = COALESCE(${body.iproxy_enabled    ?? null}, proxy_iproxy_enabled),
+        proxy_proxidize_enabled = COALESCE(${body.proxidize_enabled ?? null}, proxy_proxidize_enabled),
+        updated_at = now()
+      WHERE id = ${req.user.sub}
+      RETURNING proxy_iproxy_enabled, proxy_proxidize_enabled
+    `
+    return { iproxy_enabled: !!c.proxy_iproxy_enabled, proxidize_enabled: !!c.proxy_proxidize_enabled }
+  })
+
   // ── API KEYS ──────────────────────────────────────────────────────────────
 
   fastify.get('/settings/api-keys', auth, async (req) => {

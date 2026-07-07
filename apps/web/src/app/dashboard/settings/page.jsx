@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label'
 import { Modal } from '@/components/ui/modal'
 import {
   Settings, User, Users, Pencil, Eye, UserPlus, Save, Plus, Copy, Lock,
-  Check, X, Key, AlertCircle, CheckCircle, Star, Loader2, Trash2, Zap,
+  Check, X, Key, AlertCircle, CheckCircle, Star, Loader2, Trash2, Zap, Globe,
 } from '../../../components/ui/icons'
 import { cn } from '@/lib/utils'
 
@@ -19,6 +19,7 @@ const TABS = [
   { label: 'Equipo',    Icon: Users },
   { label: 'API Keys',  Icon: Key },
   { label: 'Agente IA', Icon: Zap },
+  { label: 'Proxies',   Icon: Globe },
 ]
 const INPUT_CLASS = 'h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0'
 
@@ -467,7 +468,136 @@ function AiAgentTab() {
   )
 }
 
-const TAB_DESC = ['Tu cuenta y contraseña', 'Miembros y roles', 'Acceso programático', 'Generación de diálogos con IA']
+// ── Proxies (anti-baneo) ──────────────────────────────────────────────────────
+function ProxiesTab() {
+  const [data, setData]   = useState(null)   // { iproxy_enabled, proxidize_enabled, accounts }
+  const [rows, setRows]   = useState({})     // edición local: { [id]: { provider, url } }
+  const [savingFlags, setSavingFlags] = useState(false)
+  const [savingId, setSavingId] = useState(null)
+  const [msg, setMsg]     = useState(null)
+
+  async function load() {
+    const { data } = await api.get('/settings/proxies')
+    setData(data)
+    setRows(Object.fromEntries((data.accounts ?? []).map(a => [a.id, {
+      provider: a.proxy_provider ?? 'none',
+      url:      a.proxy_url ?? '',
+    }])))
+  }
+  useEffect(() => { load() }, [])
+
+  function flash(type, text) { setMsg({ type, text }); setTimeout(() => setMsg(null), 4000) }
+  function setRow(id, patch) { setRows(r => ({ ...r, [id]: { ...r[id], ...patch } })) }
+
+  async function toggle(key, value) {
+    setSavingFlags(true)
+    try {
+      const { data: res } = await api.put('/settings/proxies', { [key]: value })
+      setData(d => ({ ...d, ...res }))
+    } catch { flash('err', 'No se pudo guardar la configuración') }
+    finally { setSavingFlags(false) }
+  }
+
+  async function saveRow(acc) {
+    const row = rows[acc.id] ?? { provider: 'none', url: '' }
+    if (row.provider !== 'none' && !row.url.trim()) { flash('err', 'Ingresa la URL del proxy o elige "Sin proxy"'); return }
+    setSavingId(acc.id)
+    try {
+      await api.patch(`/whatsapp/accounts/${acc.id}`, {
+        proxy_provider: row.provider,
+        proxy_url:      row.provider === 'none' ? '' : row.url.trim(),
+      })
+      flash('ok', `Proxy de "${acc.name}" guardado — el número se está reconectando…`)
+      load()
+    } catch (err) { flash('err', err.response?.data?.error ?? 'Error al guardar') }
+    finally { setSavingId(null) }
+  }
+
+  if (!data) return <div className="text-sm text-muted-foreground">Cargando…</div>
+  const anyEnabled = data.iproxy_enabled || data.proxidize_enabled
+
+  return (
+    <div className="space-y-4">
+      <SectionCard title="Proveedores de proxy"
+        description="Por defecto todos los números salen por la IP del servidor. Asignar un proxy por celular (IP propia, idealmente móvil de Perú) reduce el riesgo de baneo en cadena cuando tienes varios números.">
+        <div className="space-y-3">
+          {[
+            { key: 'iproxy_enabled',    name: 'iProxy.online', desc: 'Convierte un Android en proxy móvil: IP peruana real por celular.' },
+            { key: 'proxidize_enabled', name: 'Proxidize',     desc: 'Proxies móviles 4G/5G auto-hospedados con SIMs propias.' },
+          ].map(p => (
+            <label key={p.key} className="flex cursor-pointer items-start gap-3 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/30">
+              <input type="checkbox" className="mt-0.5 h-5 w-5 accent-jungle-green-600"
+                checked={!!data[p.key]} disabled={savingFlags}
+                onChange={e => toggle(p.key, e.target.checked)} />
+              <div>
+                <p className="text-sm font-semibold text-foreground">{p.name}</p>
+                <p className="text-xs text-muted-foreground">{p.desc}</p>
+              </div>
+            </label>
+          ))}
+        </div>
+      </SectionCard>
+
+      {!anyEnabled ? (
+        <SectionCard>
+          <p className="text-sm text-muted-foreground">Activa al menos un proveedor arriba para poder asignar un proxy a cada celular.</p>
+        </SectionCard>
+      ) : (data.accounts?.length ?? 0) === 0 ? (
+        <SectionCard>
+          <EmptyState icon={Globe} title="Sin números WhatsApp" description="Agrega números en Cuentas WhatsApp para asignarles un proxy." />
+        </SectionCard>
+      ) : (
+        <SectionCard noPadding title="Proxy por celular"
+          description="Elige qué proxy usa cada número. Al guardar, el número se reconecta a través de ese proxy.">
+          <div className="divide-y">
+            {data.accounts.map(acc => {
+              const row = rows[acc.id] ?? { provider: 'none', url: '' }
+              const opts = [
+                { value: 'none', label: 'Sin proxy (directo)' },
+                ...(data.iproxy_enabled    ? [{ value: 'iproxy',    label: 'iProxy.online' }] : []),
+                ...(data.proxidize_enabled ? [{ value: 'proxidize', label: 'Proxidize' }] : []),
+              ]
+              if (row.provider !== 'none' && !opts.some(o => o.value === row.provider)) {
+                opts.push({ value: row.provider, label: `${row.provider} (deshabilitado)` })
+              }
+              return (
+                <div key={acc.id} className="space-y-3 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{acc.name}</p>
+                      <p className="truncate font-mono text-xs text-muted-foreground">{acc.phone_number ?? 'Sin número'}</p>
+                    </div>
+                    <span className={cn('inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium', acc.is_connected ? 'bg-jungle-green-100 text-jungle-green-700' : 'bg-muted text-muted-foreground')}>
+                      <span className={cn('h-1.5 w-1.5 rounded-full', acc.is_connected ? 'bg-jungle-green-500' : 'bg-muted-foreground/40')} />
+                      {acc.is_connected ? 'Conectado' : 'Sin conectar'}
+                    </span>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-[180px_1fr_auto]">
+                    <select className={cn(INPUT_CLASS, 'px-3')} value={row.provider}
+                      onChange={e => setRow(acc.id, { provider: e.target.value })}>
+                      {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <Input className={INPUT_CLASS} value={row.url}
+                      disabled={row.provider === 'none'}
+                      placeholder="socks5://usuario:clave@host:puerto"
+                      onChange={e => setRow(acc.id, { url: e.target.value })} />
+                    <Button onClick={() => saveRow(acc)} disabled={savingId === acc.id} className="h-[52px] shrink-0 rounded-xl">
+                      {savingId === acc.id ? <><Loader2 size={16} className="animate-spin" /> Guardando…</> : <><Save size={16} /> Guardar</>}
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </SectionCard>
+      )}
+
+      <Notice type={msg?.type} msg={msg?.text} />
+    </div>
+  )
+}
+
+const TAB_DESC = ['Tu cuenta y contraseña', 'Miembros y roles', 'Acceso programático', 'Generación de diálogos con IA', 'Proxy por celular (anti-baneo)']
 
 export default function SettingsPage() {
   const [tab, setTab] = useState(0)
@@ -506,6 +636,7 @@ export default function SettingsPage() {
           {tab === 1 && <TeamTab />}
           {tab === 2 && <ApiKeysTab />}
           {tab === 3 && <AiAgentTab />}
+          {tab === 4 && <ProxiesTab />}
         </div>
       </div>
     </div>
