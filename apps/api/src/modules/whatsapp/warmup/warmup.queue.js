@@ -2,7 +2,7 @@ import { Queue, Worker } from 'bullmq'
 import { redis } from '../../../lib/redis.js'
 import { sql } from '../../../lib/db.js'
 import { baileysManager } from '../baileys.manager.js'
-import { recordWarmupMessage } from './warmup.service.js'
+import { recordWarmupMessage, getWarmupConfig, effectiveConfig, isActiveNow } from './warmup.service.js'
 import { bus } from '../../../lib/eventBus.js'
 
 const QUEUE_NAME = 'warmup-jobs'
@@ -35,7 +35,7 @@ export function startWarmupWorker() {
 
       // Verificar que el chip siga habilitado, conectado y no baneado.
       const [acc] = await sql`
-        SELECT id, client_id, warmup_enabled, banned_at, is_active
+        SELECT id, client_id, warmup_enabled, banned_at, is_active, warmup_overrides
         FROM whatsapp_accounts WHERE id = ${fromAccountId}
       `
       if (!acc || !acc.warmup_enabled || acc.banned_at || !acc.is_active) {
@@ -43,6 +43,14 @@ export function startWarmupWorker() {
       }
       if (baileysManager.getStatus(fromInstance) !== 'connected') {
         return { skipped: 'chip no conectado' }
+      }
+
+      // Respetar el horario/días activos también al ENVIAR (no solo al encolar):
+      // los mensajes se encolan con delay y una conversación iniciada cerca del
+      // corte no debe seguir soltando turnos fuera de la ventana (p.ej. tras 10pm).
+      const cfg = effectiveConfig(await getWarmupConfig(acc.client_id), acc)
+      if (!isActiveNow(cfg)) {
+        return { skipped: 'fuera de horario activo' }
       }
 
       // Nota: el conteo diario (warmup_sent) se registra al ENCOLAR en el
