@@ -6,7 +6,7 @@ import {
   getWarmupConfig, effectiveConfig, isActiveNow,
   convTargetForDay, activeElapsedFraction, convSentTodayFor,
   getActiveConversations, markConversationUsed, randomDelayMs,
-  recordWarmupSent, recordWarmupConv, threadKeyFor,
+  recordWarmupSent, recordWarmupConv, threadKeyFor, delayFactorForDay,
 } from './warmup.service.js'
 
 const MAX_CONV_PER_TICK = 6            // tope de conversaciones que un chip arranca por tick
@@ -65,9 +65,9 @@ async function pickExternalPhone(clientId) {
 
 // Reproduce una conversación entre dos chips internos (ambos envían). a y b son
 // filas de whatsapp_accounts. startOffset escalona el arranque dentro del tick.
-async function playInternal(a, b, conv, cfg, startOffset) {
+async function playInternal(a, b, conv, cfg, startOffset, factor = 1) {
   const turns = variableTurns(conv.turns)
-  let delay = startOffset + randomDelayMs(cfg)
+  let delay = startOffset + randomDelayMs(cfg, factor)
   for (const turn of turns) {
     const isA = turn.from === 'a'
     const sender   = isA ? a : b
@@ -86,14 +86,14 @@ async function playInternal(a, b, conv, cfg, startOffset) {
       threadKey:      threadKeyFor(sender.phone_number, receiver.phone_number),
     }, delay)
     await recordWarmupSent(sender.id)
-    delay += randomDelayMs(cfg)
+    delay += randomDelayMs(cfg, factor)
   }
 }
 
 // Reproduce solo los turnos salientes hacia un número externo real.
-async function playExternal(a, phone, conv, cfg, startOffset) {
+async function playExternal(a, phone, conv, cfg, startOffset, factor = 1) {
   const turns = variableTurns(conv.turns)
-  let delay = startOffset + randomDelayMs(cfg)
+  let delay = startOffset + randomDelayMs(cfg, factor)
   for (const turn of turns) {
     if (turn.from !== 'a') continue
     await enqueueWarmupTurn({
@@ -110,7 +110,7 @@ async function playExternal(a, phone, conv, cfg, startOffset) {
       threadKey:      threadKeyFor(a.phone_number, phone),
     }, delay)
     await recordWarmupSent(a.id)
-    delay += randomDelayMs(cfg)
+    delay += randomDelayMs(cfg, factor)
   }
 }
 
@@ -139,6 +139,7 @@ async function tickClient(clientId) {
   for (const c of chips) {
     const ecfg = effectiveConfig(cfg, c)
     const day  = await ensureWarmupDay(c, ecfg)
+    c.__day = day                       // día de calentamiento (null = ya terminó → maduro)
     if (day == null) continue
     const dailyConv  = convTargetForDay(ecfg, day)
     const allowedNow = Math.max(1, Math.ceil(dailyConv * frac))
@@ -150,29 +151,54 @@ async function tickClient(clientId) {
 
   let ci = 0
   const nextConv = () => convs[(ci++) % convs.length]
+  // Día efectivo para el factor: si ya terminó el warmup (null) cuenta como el
+  // último día (factor 1×, el más rápido).
+  const dayOf = c => (c.__day == null ? (cfg.warmup_days ?? 7) : c.__day)
 
   shuffle(eligible)
   for (const e of eligible) {
     const cfgE          = e.ecfg
     const allowExternal = cfgE.allow_external === true
     const others        = chips.filter(c => c.id !== e.chip.id)  // otros chips activos (para internas)
+    const isDay1        = e.chip.__day === 1
     const n = Math.min(e.remaining, MAX_CONV_PER_TICK)
 
     for (let i = 0; i < n; i++) {
-      // Interno por defecto; externo solo si está permitido (según internal_ratio).
-      const goInternal = !allowExternal || Math.random() < (cfgE.internal_ratio ?? 0.6)
       const conv = nextConv()
       await markConversationUsed(conv.id).catch(() => {})
       const startOffset = randInt(TICK_SPREAD_MS)
 
+      // ── Día 1: el chip nuevo SOLO responde (un chip más maduro inicia) y con el
+      // intervalo más largo. Sin externos. Si no hay chip más maduro, se salta.
+      if (isDay1) {
+        const mature = others.filter(o => dayOf(o) > 1)
+        if (!mature.length) continue
+        const partner = mature[randInt(mature.length)]
+        const factor  = delayFactorForDay(cfg, 1)
+        // Asignar roles para que el chip NUEVO nunca envíe el primer turno:
+        // el que envía primero (turns[0].from) debe ser el chip maduro.
+        const firstSender = conv.turns?.[0]?.from ?? 'a'
+        const [pa, pb] = firstSender === 'a' ? [partner, e.chip] : [e.chip, partner]
+        await playInternal(pa, pb, conv, cfgE, startOffset, factor)
+        await recordWarmupConv(e.chip.id)
+        continue
+      }
+
+      // ── Día 2+: comportamiento normal. Interno por defecto; externo solo si está
+      // permitido (según internal_ratio). El intervalo se escala por el participante
+      // MÁS NUEVO (se va acortando a medida que ambos maduran).
+      const goInternal = !allowExternal || Math.random() < (cfgE.internal_ratio ?? 0.6)
+
       if (goInternal && others.length) {
         const partner = others[randInt(others.length)]
-        await playInternal(e.chip, partner, conv, cfgE, startOffset)
+        const factor  = delayFactorForDay(cfg, Math.min(dayOf(e.chip), dayOf(partner)))
+        await playInternal(e.chip, partner, conv, cfgE, startOffset, factor)
         await recordWarmupConv(e.chip.id)
       } else if (allowExternal) {
         const phone = await pickExternalPhone(clientId)
         if (!phone) continue
-        await playExternal(e.chip, phone, conv, cfgE, startOffset)
+        const factor = delayFactorForDay(cfg, dayOf(e.chip))
+        await playExternal(e.chip, phone, conv, cfgE, startOffset, factor)
         await recordWarmupConv(e.chip.id)
       }
       // Si es interno pero no hay otro chip (solo 1 activo) y externos apagados: nada.

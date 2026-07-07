@@ -258,11 +258,26 @@ export async function markConversationUsed(id) {
   await sql`UPDATE warmup_conversations SET last_used_at = now() WHERE id = ${id}`
 }
 
-// Delay aleatorio en ms entre dos mensajes según config.
-export function randomDelayMs(cfg) {
+// Delay aleatorio en ms entre dos mensajes según config. `factor` alarga el
+// intervalo (p.ej. chips nuevos en día 1 → más espaciado, ver delayFactorForDay).
+export function randomDelayMs(cfg, factor = 1) {
   const min = (cfg.delay_min_sec ?? 30)
   const max = Math.max(min + 1, cfg.delay_max_sec ?? 300)
-  return Math.floor(Math.random() * (max - min) + min) * 1000
+  const secs = (Math.random() * (max - min) + min) * (factor > 0 ? factor : 1)
+  return Math.floor(secs) * 1000
+}
+
+// Multiplicador del intervalo entre mensajes según el DÍA de calentamiento del
+// chip. Día 1 = DELAY_DAY1_FACTOR (más lento/espaciado, protege a números nuevos
+// o recién reactivados de patrones de spam) y baja linealmente hasta 1× el último
+// día del calentamiento. Se usa con el participante más nuevo de la conversación.
+export const DELAY_DAY1_FACTOR = 3
+export function delayFactorForDay(cfg, day) {
+  const days = Math.max(1, Number(cfg.warmup_days ?? 7))
+  if (days <= 1) return 1
+  const d = Math.min(Math.max(1, Number(day || 1)), days)
+  const f = DELAY_DAY1_FACTOR - (DELAY_DAY1_FACTOR - 1) * ((d - 1) / (days - 1))
+  return Math.max(1, f)
 }
 
 // Clave de hilo del chat: par de teléfonos ordenado, para agrupar A↔B sin importar dirección.
