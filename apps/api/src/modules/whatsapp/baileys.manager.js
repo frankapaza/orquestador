@@ -19,6 +19,7 @@ import { processIncoming, processOutgoingFromDevice, updateMessageStatus } from 
 import { bus } from '../../lib/eventBus.js'
 import { internalAccountsByPhone, recordWarmupReceived } from './warmup/warmup.service.js'
 import { createAlert } from './warmup/alerts.service.js'
+import { handleAssistantInbound } from '../assistants/assistant.responder.js'
 
 const __dirname  = dirname(fileURLToPath(import.meta.url))
 const SESSIONS_DIR = join(__dirname, '..', '..', '..', 'sessions')
@@ -366,12 +367,22 @@ class BaileysManager {
         }
 
         const { mediaUrl, mediaType } = await saveIncomingMedia(m, sock, silentLogger)
-        await processIncoming({
+        const inbound = await processIncoming({
           clientId: acc.client_id, channel: 'whatsapp',
           accountId: acc.id, accountType: 'whatsapp',
           contactPhone, contactName, isGroup,
           body: getBody(m), mediaUrl, mediaType, externalId: m.key.id,
         })
+
+        // Asistente IA (fase 1): si el número tiene un asistente activo, responde
+        // al entrante. Best-effort, en segundo plano (no bloquea el handler).
+        if (inbound?.conv && !isGroup) {
+          handleAssistantInbound({
+            instanceName: name, accountId: acc.id, clientId: acc.client_id,
+            contactPhone, contactName, conversationId: inbound.conv.id,
+            text: getBody(m), isGroup,
+          }).catch(e => console.error('[Assistant] inbound:', e.message))
+        }
       }
     })
 

@@ -21,6 +21,7 @@ import { webhooksRoutes }     from './modules/webhooks/webhooks.routes.js'
 import { adminRoutes }        from './modules/admin/admin.routes.js'
 import { settingsRoutes }     from './modules/settings/settings.routes.js'
 import { whatsappRoutes }     from './modules/whatsapp/whatsapp.routes.js'
+import { assistantsRoutes }   from './modules/assistants/assistants.routes.js'
 import { smsRoutes }          from './modules/sms/sms.routes.js'
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js'
 import { incomingWebhooksRoutes } from './modules/channels/incoming-webhooks.routes.js'
@@ -70,6 +71,7 @@ fastify.register(integrationsRoutes, { prefix: API_PREFIX })
 fastify.register(adminRoutes,        { prefix: API_PREFIX })
 fastify.register(settingsRoutes,     { prefix: API_PREFIX })
 fastify.register(whatsappRoutes,     { prefix: API_PREFIX })
+fastify.register(assistantsRoutes,   { prefix: API_PREFIX })
 fastify.register(warmupRoutes,       { prefix: API_PREFIX })
 fastify.register(smsRoutes,          { prefix: API_PREFIX })
 fastify.register(conversationsRoutes, { prefix: API_PREFIX })
