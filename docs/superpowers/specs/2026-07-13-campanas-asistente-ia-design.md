@@ -33,7 +33,7 @@ Alcance de esta entrega: **los tres tipos juntos** (comparten wizard y worker, e
 - **Modo de campaña IA vs manual**: se añade columna `campaigns.assistant_id UUID NULL`. Presente = campaña IA; `null` = WhatsApp/SMS manual. Se mantiene `channel='whatsapp'`. (Descartado: crear canal `whatsapp_ai` — ensucia el enum y duplica rutas.)
 - **La campaña IA envía el saludo del asistente interpolado** como primer mensaje (decisión del usuario).
 - **La data del Excel se guarda como lista de contactos reutilizable** (visible en Contactos), indexada por teléfono (decisión del usuario).
-- **Ruteo de respuestas**: la campaña IA envía **solo desde números WhatsApp que tengan ese `assistant_id` vinculado**, para que el entrante caiga en el asistente correcto.
+- **Ruteo de respuestas**: la campaña IA envía **solo desde números WhatsApp que tengan ese `assistant_id` vinculado**, para que el entrante caiga en el asistente correcto. Se puede elegir **un solo número o un pool (grupo) de varios números**; el worker **rota** entre los seleccionados para repartir carga y reducir riesgo de baneo.
 - **SMS de 160**: se **informa**, no se bloquea. El texto se manda completo (el gateway hace el multipart); guardamos el conteo de segmentos para el reporte.
 
 ## Arquitectura
@@ -98,7 +98,7 @@ Es la única fuente de verdad de las columnas de la plantilla y del preview.
 - Campaña IA: si `campaign.assistant_id`, el body = `greeting` del asistente **interpolado** (en vez de `content_text`).
 
 **`campaign.queue.js`:**
-- En `enqueueCampaign`, para campaña IA, restringir el pool de cuentas WhatsApp a las que tienen ese `assistant_id` (o validar en `pickWhatsappAccount`).
+- En `enqueueCampaign`, para campaña IA, restringir el pool de cuentas WhatsApp a **las seleccionadas en la campaña** (uno o varios números), todas con ese `assistant_id`. `pickWhatsappAccount` rota entre ellas (menos cargada primero) respetando cuotas y horario. Persistir la selección de números en `campaigns.settings` (p. ej. `settings.wa_account_ids: []`).
 - SMS: calcular y guardar `segments` en el job/metadata para el reporte (no parte el texto).
 
 ### 8. Segmentación SMS (frontend)
@@ -110,7 +110,7 @@ Es la única fuente de verdad de las columnas de la plantilla y del preview.
 ### 9. Wizard de creación (`apps/web/src/app/dashboard/campaigns/new/page.jsx`)
 
 - Selector de tipo arriba: **Email · WhatsApp · WhatsApp IA · SMS**.
-- **WhatsApp IA**: paso extra → (a) seleccionar asistente; (b) botón **Descargar plantilla Excel**; (c) subir Excel lleno → preview (nº destinatarios, variables detectadas/faltantes) → crea la lista; (d) seleccionar número(s) WhatsApp **filtrados** a los que tienen ese asistente. Sin campo de mensaje.
+- **WhatsApp IA**: paso extra → (a) seleccionar asistente; (b) botón **Descargar plantilla Excel**; (c) subir Excel lleno → preview (nº destinatarios, variables detectadas/faltantes) → crea la lista; (d) seleccionar **uno o varios** número(s) WhatsApp (pool) **filtrados** a los que tienen ese asistente vinculado. Sin campo de mensaje.
 - **WhatsApp manual / SMS**: elegir lista + `content_text` con ayuda de variables; SMS con contador de segmentos.
 - **Email**: sin cambios.
 
