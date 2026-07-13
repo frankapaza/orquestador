@@ -2,21 +2,12 @@ import { sql } from '../../lib/db.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
 import { resolveAiSettings } from '../whatsapp/warmup/ai.generator.js'
 import { isActiveNow } from '../whatsapp/warmup/warmup.service.js'
+import { resolveVars } from './assistant.vars.js'
 
 const digits = p => (p ?? '').replace(/\D/g, '')
 
 // Palabras que apagan la IA en esa conversación (opt-out del cliente).
 const OPT_OUT = /^\s*(stop|baja|cancelar|no escribir|no molestar|dar de baja)\s*!?\.?\s*$/i
-
-// Reemplaza {{VARIABLE}} usando el contexto del cliente (mayúsculas, sin importar
-// cómo se escriba dentro de las llaves). Variable sin valor → queda vacía.
-function resolveVars(text, ctx) {
-  if (!text) return ''
-  return text.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (_, k) => {
-    const v = ctx[k.toUpperCase()]
-    return v == null ? '' : String(v)
-  })
-}
 
 // Arma el contexto de variables del cliente: datos del contacto + su metadata
 // (columnas del Excel importado en la campaña) + teléfono.
