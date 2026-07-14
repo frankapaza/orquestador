@@ -109,6 +109,65 @@ export async function campaignsRoutes(fastify) {
     return { list_id: list.id, list_name: list.name, total: imported, columns: parsed.columns, variables_faltantes }
   })
 
+  // Genera una campaña SMS de seguimiento para los no-entregados de una campaña
+  // WhatsApp IA: crea una lista con esos contactos y devuelve el número wa.me del
+  // asistente. El front abre el wizard SMS con esta lista y arma el link {{link}}.
+  fastify.post('/campaigns/:id/sms-followup', auth, async (req, reply) => {
+    const [campaign] = await sql`
+      SELECT * FROM campaigns WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!campaign) return reply.code(404).send({ error: 'Campaña no encontrada' })
+    if (campaign.channel !== 'whatsapp' || !campaign.assistant_id) {
+      return reply.code(400).send({ error: 'Solo aplica a campañas de WhatsApp IA' })
+    }
+
+    // No entregados: jobs 'sent' cuyo saludo no está delivered/read.
+    const undelivered = await sql`
+      SELECT cj.contact_id, cj.phone_number, c.first_name, c.last_name, c.metadata
+      FROM campaign_jobs cj
+      JOIN contacts c ON c.id = cj.contact_id
+      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub}
+      WHERE cj.campaign_id = ${campaign.id}
+        AND cj.channel = 'whatsapp' AND cj.status = 'sent'
+        AND cj.phone_number IS NOT NULL AND cj.phone_number <> ''
+        AND COALESCE(m.status, 'sent') NOT IN ('delivered', 'read')
+    `
+    if (!undelivered.length) {
+      return reply.code(400).send({ error: 'No hay destinatarios sin entregar en esta campaña' })
+    }
+
+    // Lista nueva con esos contactos (nombre + metadata para las variables del SMS).
+    const [list] = await sql`
+      INSERT INTO contact_lists (client_id, name, description, source)
+      VALUES (${req.user.sub}, ${campaign.name + ' — no entregados'}, 'Seguimiento SMS con link wa.me', 'campaign')
+      RETURNING *
+    `
+    const rows = undelivered.map(u => ({
+      phone:      u.phone_number,
+      first_name: u.first_name,
+      last_name:  u.last_name,
+      metadata:   u.metadata && typeof u.metadata === 'object' ? u.metadata : {},
+    }))
+    const imported = await upsertContactsByPhone(req.user.sub, list.id, rows)
+    await sql`
+      UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${list.id})
+      WHERE id = ${list.id}
+    `
+
+    // Número wa.me: el WhatsApp del asistente (conectado; del pool si lo hay).
+    const wanted = campaign.settings?.wa_account_ids ?? []
+    const [acc] = await sql`
+      SELECT phone_number FROM whatsapp_accounts
+      WHERE client_id = ${req.user.sub} AND assistant_id = ${campaign.assistant_id}
+        ${wanted.length ? sql`AND id IN ${sql(wanted)}` : sql``}
+      ORDER BY is_connected DESC, created_at ASC
+      LIMIT 1
+    `
+    const wameNumber = acc ? String(acc.phone_number).replace(/\D/g, '') : null
+
+    return { list_id: list.id, total: imported, wame_number: wameNumber }
+  })
+
   fastify.get('/campaigns', auth, async (req) => {
     return sql`
       SELECT c.*, cl.name as list_name
