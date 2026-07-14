@@ -111,12 +111,14 @@ function NewCampaignForm() {
 
   // SMS de seguimiento: llega desde el detalle de campaña con ?channel=sms&list_id=<id>&wame=<digits>
   useEffect(() => {
-    const wameParam = searchParams.get('wame')
-    if (!wameParam) return
-    setWameNumber(wameParam)
-    pickChannel(searchParams.get('channel') || 'sms')
-    const listIdParam = searchParams.get('list_id')
+    const listIdParam  = searchParams.get('list_id')
+    const channelParam = searchParams.get('channel')
+    // Gate por list_id/channel (no por wame): si el número no se pudo resolver la
+    // lista igual debe pre-cargarse, no caer al wizard de email por defecto.
+    if (!listIdParam && !channelParam) return
+    if (channelParam) pickChannel(channelParam)
     if (listIdParam) set('list_id', listIdParam)
+    setWameNumber(searchParams.get('wame') || '')
   }, [])
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }

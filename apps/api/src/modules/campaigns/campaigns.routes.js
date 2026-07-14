@@ -126,7 +126,7 @@ export async function campaignsRoutes(fastify) {
       SELECT cj.contact_id, cj.phone_number, c.first_name, c.last_name, c.metadata
       FROM campaign_jobs cj
       JOIN contacts c ON c.id = cj.contact_id
-      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub}
+      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub} AND m.direction = 'outbound'
       WHERE cj.campaign_id = ${campaign.id}
         AND cj.channel = 'whatsapp' AND cj.status = 'sent'
         AND cj.phone_number IS NOT NULL AND cj.phone_number <> ''
@@ -134,6 +134,22 @@ export async function campaignsRoutes(fastify) {
     `
     if (!undelivered.length) {
       return reply.code(400).send({ error: 'No hay destinatarios sin entregar en esta campaña' })
+    }
+
+    // Número wa.me: el WhatsApp del asistente (conectado; del pool si lo hay).
+    // Se resuelve ANTES de crear la lista: sin número no se puede armar el link,
+    // así que fallamos temprano y no dejamos una lista huérfana.
+    const wanted = campaign.settings?.wa_account_ids ?? []
+    const [acc] = await sql`
+      SELECT phone_number FROM whatsapp_accounts
+      WHERE client_id = ${req.user.sub} AND assistant_id = ${campaign.assistant_id}
+        ${wanted.length ? sql`AND id IN ${sql(wanted)}` : sql``}
+      ORDER BY is_connected DESC, created_at ASC
+      LIMIT 1
+    `
+    const wameNumber = acc?.phone_number ? String(acc.phone_number).replace(/\D/g, '') : null
+    if (!wameNumber) {
+      return reply.code(400).send({ error: 'El asistente no tiene un número de WhatsApp vinculado para armar el link wa.me' })
     }
 
     // Lista nueva con esos contactos (nombre + metadata para las variables del SMS).
@@ -153,17 +169,6 @@ export async function campaignsRoutes(fastify) {
       UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${list.id})
       WHERE id = ${list.id}
     `
-
-    // Número wa.me: el WhatsApp del asistente (conectado; del pool si lo hay).
-    const wanted = campaign.settings?.wa_account_ids ?? []
-    const [acc] = await sql`
-      SELECT phone_number FROM whatsapp_accounts
-      WHERE client_id = ${req.user.sub} AND assistant_id = ${campaign.assistant_id}
-        ${wanted.length ? sql`AND id IN ${sql(wanted)}` : sql``}
-      ORDER BY is_connected DESC, created_at ASC
-      LIMIT 1
-    `
-    const wameNumber = acc ? String(acc.phone_number).replace(/\D/g, '') : null
 
     return { list_id: list.id, total: imported, wame_number: wameNumber }
   })
@@ -376,7 +381,7 @@ export async function campaignsRoutes(fastify) {
              c.first_name, c.last_name, m.status AS delivery_status
       FROM campaign_jobs cj
       JOIN contacts c ON c.id = cj.contact_id
-      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub}
+      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub} AND m.direction = 'outbound'
       WHERE cj.campaign_id = ${req.params.id} ${whereStatus}
       ORDER BY cj.sent_at DESC NULLS LAST, cj.created_at
       LIMIT ${limit} OFFSET ${offset}
@@ -385,7 +390,7 @@ export async function campaignsRoutes(fastify) {
     const [{ count }] = await sql`
       SELECT COUNT(*)
       FROM campaign_jobs cj
-      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub}
+      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub} AND m.direction = 'outbound'
       WHERE cj.campaign_id = ${req.params.id} ${whereStatus}
     `
 
