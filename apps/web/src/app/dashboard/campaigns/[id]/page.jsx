@@ -122,6 +122,7 @@ export default function CampaignDetailPage() {
     { value: 'failed', label: 'Fallidos' },
     { value: 'invalid', label: 'Sin WhatsApp' },
     { value: 'bounced', label: 'Rebotados' },
+    { value: 'undelivered', label: 'No entregado' },
   ]
 
   return (
@@ -164,6 +165,22 @@ export default function CampaignDetailPage() {
               <Button variant="outline" asChild>
                 <Link href={`/dashboard/reports/${id}`}>Ver reporte</Link>
               </Button>
+              {campaign.channel === 'whatsapp' && campaign.assistant_id && (
+                <Button variant="outline" disabled={actionLoading} onClick={async () => {
+                  setActionLoading(true)
+                  try {
+                    const { data } = await api.post(`/campaigns/${id}/sms-followup`)
+                    const { list_id, wame_number } = data
+                    router.push(`/dashboard/campaigns/new?channel=sms&list_id=${list_id}&wame=${wame_number ?? ''}`)
+                  } catch (e) {
+                    alert(e?.response?.data?.error ?? 'No se pudo generar el seguimiento SMS')
+                  } finally {
+                    setActionLoading(false)
+                  }
+                }}>
+                  Generar SMS con link wa.me
+                </Button>
+              )}
             </div>
           }
         />
@@ -280,6 +297,13 @@ export default function CampaignDetailPage() {
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${JOB_COLOR[job.status] ?? 'bg-muted text-muted-foreground'}`}>
                       {job.status === 'invalid' ? 'Sin WhatsApp' : job.status}
                     </span>
+                    {job.delivery_status && (
+                      <span className="ml-2 text-xs text-muted-foreground" title={`Entrega: ${job.delivery_status}`}>
+                        {job.delivery_status === 'read' ? '✓✓ leído'
+                          : job.delivery_status === 'delivered' ? '✓✓ entregado'
+                          : '✓ enviado'}
+                      </span>
+                    )}
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
                     {job.sent_at ? new Date(job.sent_at).toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' }) : '-'}
