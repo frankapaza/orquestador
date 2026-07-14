@@ -10,7 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { SelectMenu } from '@/components/ui/select-menu'
 import {
   Megaphone, RotateCcw, ArrowLeft, ArrowRight, Check, FileText, Mail, MessageCircle,
-  Smartphone, Users, Image, ClipboardList, Loader2, Info, AlertTriangle, Send,
+  Smartphone, Users, Image, ClipboardList, Loader2, Info, AlertTriangle, Send, Bot, Download, CheckCircle,
 } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { smsSegments } from '@/lib/sms'
@@ -23,13 +23,15 @@ const STRATEGIES = [
 ]
 
 const CHANNELS = [
-  { key: 'email',    label: 'Email',    desc: 'HTML, plantillas y seguimiento de aperturas', Icon: Mail,          tint: 'amber' },
-  { key: 'whatsapp', label: 'WhatsApp', desc: 'Mensaje rotando tus números conectados',       Icon: MessageCircle, tint: 'green' },
-  { key: 'sms',      label: 'SMS',      desc: 'Texto vía tus gateways SMS',                    Icon: Smartphone,    tint: 'violet' },
+  { key: 'email',       label: 'Email',      desc: 'HTML, plantillas y seguimiento de aperturas',  Icon: Mail,          tint: 'amber' },
+  { key: 'whatsapp',    label: 'WhatsApp',   desc: 'Mensaje rotando tus números conectados',        Icon: MessageCircle, tint: 'green' },
+  { key: 'whatsapp_ai', label: 'WhatsApp IA',desc: 'Un asistente IA saluda y conversa por ti',       Icon: Bot,           tint: 'teal' },
+  { key: 'sms',         label: 'SMS',        desc: 'Texto vía tus gateways SMS',                     Icon: Smartphone,    tint: 'violet' },
 ]
 const CHANNEL_TINT = {
   amber:  { sel: 'border-amber-500 bg-amber-50', icon: 'bg-amber-100 text-amber-700' },
   green:  { sel: 'border-green-500 bg-green-50', icon: 'bg-green-100 text-green-700' },
+  teal:   { sel: 'border-teal-500 bg-teal-50', icon: 'bg-teal-100 text-teal-700' },
   violet: { sel: 'border-violet-500 bg-violet-50', icon: 'bg-violet-100 text-violet-700' },
 }
 
@@ -49,6 +51,16 @@ function NewCampaignForm() {
   const [loadingFrom, setLoadingFrom] = useState(!!fromId)
   const [error, setError] = useState('')
 
+  // WhatsApp IA
+  const [isAI, setIsAI] = useState(false)
+  const [assistants, setAssistants] = useState([])
+  const [waAccounts, setWaAccounts] = useState([])
+  const [assistantId, setAssistantId] = useState('')
+  const [selectedAccIds, setSelectedAccIds] = useState([])
+  const [importInfo, setImportInfo] = useState(null) // { list_id, list_name, total, columns, variables_faltantes }
+  const [importing, setImporting] = useState(false)
+  const [templateLoading, setTemplateLoading] = useState(false)
+
   const [form, setForm] = useState({
     name: '', channel: 'email',
     subject: '', from_name: '', reply_to: '', strategy: 'smtp_own', html_content: '', text_content: '',
@@ -58,7 +70,7 @@ function NewCampaignForm() {
   })
 
   const isEmail = form.channel === 'email'
-  const STEPS = isEmail ? ['Configuración', 'Contenido', 'Envío'] : ['Configuración', 'Mensaje', 'Envío']
+  const STEPS = isEmail ? ['Configuración', 'Contenido', 'Envío'] : ['Configuración', isAI ? 'Asistente' : 'Mensaje', 'Envío']
 
   useEffect(() => {
     api.get('/lists').then(r => setLists(r.data))
@@ -85,11 +97,21 @@ function NewCampaignForm() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!isAI) return
+    api.get('/whatsapp/assistants')
+      .then(r => { setAssistants(r.data.assistants ?? []); setWaAccounts(r.data.accounts ?? []) })
+      .catch(() => {})
+  }, [isAI])
+
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
   function setSetting(field, value) { setForm(f => ({ ...f, settings: { ...f.settings, [field]: value } })) }
 
-  function pickChannel(ch) {
-    setStep(0); setError('')
+  function pickChannel(key) {
+    const ai = key === 'whatsapp_ai'
+    const ch = ai ? 'whatsapp' : key
+    setStep(0); setError(''); setIsAI(ai)
+    if (!ai) { setAssistantId(''); setSelectedAccIds([]); setImportInfo(null) }
     setForm(f => ({
       ...f, channel: ch,
       settings: {
@@ -101,6 +123,42 @@ function NewCampaignForm() {
     }))
   }
 
+  async function downloadTemplate() {
+    if (!assistantId || templateLoading) return
+    setTemplateLoading(true)
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('kubo_token') : null
+      const base  = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1'
+      const res   = await fetch(`${base}/whatsapp/assistants/${assistantId}/plantilla.xlsx`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error('download failed')
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const asstName = assistants.find(x => x.id === assistantId)?.name ?? 'asistente'
+      const link = document.createElement('a')
+      link.href     = url
+      link.download = `plantilla-${asstName.replace(/[^a-z0-9]/gi, '_')}.xlsx`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('No se pudo descargar la plantilla')
+    } finally { setTemplateLoading(false) }
+  }
+
+  async function uploadRecipients(file) {
+    if (!file) return
+    setImporting(true); setImportInfo(null)
+    try {
+      const fd = new FormData(); fd.append('file', file)
+      const q = `?assistant_id=${assistantId}&name=${encodeURIComponent(form.name || 'Campaña')}`
+      const r = await api.post(`/campaigns/import-recipients${q}`, fd)
+      setImportInfo(r.data)
+    } catch (err) {
+      alert(err?.response?.data?.error ?? 'Error al subir el Excel')
+    } finally { setImporting(false) }
+  }
+
   function loadTemplate(id) {
     setTemplateId(id)
     const t = templates.find(t => t.id === id)
@@ -109,42 +167,63 @@ function NewCampaignForm() {
 
   function canGoNext() {
     if (step === 0) {
-      if (!form.name || !form.list_id) return false
+      if (!form.name) return false
+      if (!isAI && !form.list_id) return false
       if (isEmail) {
         if (!form.subject || !form.from_name) return false
         if (form.strategy !== 'smtp_own') return !!form.settings.integration_id
       }
       return true
     }
-    if (step === 1) return isEmail ? form.html_content.trim().length > 0 : form.content_text.trim().length > 0
+    if (step === 1) {
+      if (isAI) return !!assistantId && !!importInfo?.list_id && selectedAccIds.length > 0
+      return isEmail ? form.html_content.trim().length > 0 : form.content_text.trim().length > 0
+    }
     return true
   }
 
   async function submit() {
+    if (isAI) {
+      if (!assistantId) return setError('Selecciona un asistente')
+      if (!importInfo?.list_id) return setError('Sube el Excel de destinatarios')
+      if (selectedAccIds.length === 0) return setError('Selecciona al menos un número de WhatsApp')
+    }
     setLoading(true); setError('')
     try {
-      const payload = {
-        name: form.name, channel: form.channel, list_id: form.list_id,
-        settings: { delay_min_ms: form.settings.delay_min_ms, delay_max_ms: form.settings.delay_max_ms, send_to_all: form.settings.send_to_all },
-      }
-      if (form.scheduled_at) payload.scheduled_at = new Date(form.scheduled_at).toISOString()
-
-      if (isEmail) {
-        Object.assign(payload, {
-          subject: form.subject, from_name: form.from_name, html_content: form.html_content, strategy: form.strategy,
-        })
-        if (form.reply_to) payload.reply_to = form.reply_to
-        if (form.text_content) payload.text_content = form.text_content
-        payload.settings = {
-          ...payload.settings,
-          rotate_accounts: form.settings.rotate_accounts, track_opens: form.settings.track_opens, track_clicks: form.settings.track_clicks,
+      let payload
+      if (isAI) {
+        payload = {
+          name: form.name, channel: 'whatsapp', assistant_id: assistantId, list_id: importInfo.list_id,
+          settings: {
+            delay_min_ms: form.settings.delay_min_ms, delay_max_ms: form.settings.delay_max_ms,
+            send_to_all: true, wa_account_ids: selectedAccIds,
+          },
         }
-        if (form.settings.integration_id) payload.settings.integration_id = form.settings.integration_id
+        if (form.scheduled_at) payload.scheduled_at = new Date(form.scheduled_at).toISOString()
       } else {
-        payload.content_text = form.content_text
-        if (form.channel === 'whatsapp' && form.media_url) {
-          payload.media_url = form.media_url
-          if (form.media_caption) payload.media_caption = form.media_caption
+        payload = {
+          name: form.name, channel: form.channel, list_id: form.list_id,
+          settings: { delay_min_ms: form.settings.delay_min_ms, delay_max_ms: form.settings.delay_max_ms, send_to_all: form.settings.send_to_all },
+        }
+        if (form.scheduled_at) payload.scheduled_at = new Date(form.scheduled_at).toISOString()
+
+        if (isEmail) {
+          Object.assign(payload, {
+            subject: form.subject, from_name: form.from_name, html_content: form.html_content, strategy: form.strategy,
+          })
+          if (form.reply_to) payload.reply_to = form.reply_to
+          if (form.text_content) payload.text_content = form.text_content
+          payload.settings = {
+            ...payload.settings,
+            rotate_accounts: form.settings.rotate_accounts, track_opens: form.settings.track_opens, track_clicks: form.settings.track_clicks,
+          }
+          if (form.settings.integration_id) payload.settings.integration_id = form.settings.integration_id
+        } else {
+          payload.content_text = form.content_text
+          if (form.channel === 'whatsapp' && form.media_url) {
+            payload.media_url = form.media_url
+            if (form.media_caption) payload.media_caption = form.media_caption
+          }
         }
       }
 
@@ -157,7 +236,8 @@ function NewCampaignForm() {
 
   const listOpts  = lists.map(l => ({ value: l.id, label: `${l.name} · ${Number(l.total_count).toLocaleString()} contactos`, icon: <Users size={14} className="shrink-0 text-muted-foreground" /> }))
   const selList   = lists.find(l => l.id === form.list_id)
-  const chMeta    = CHANNELS.find(c => c.key === form.channel)
+  const chMeta    = CHANNELS.find(c => c.key === (isAI ? 'whatsapp_ai' : form.channel))
+  const linkedAccounts = waAccounts.filter(w => w.assistant_id === assistantId)
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -191,9 +271,9 @@ function NewCampaignForm() {
           {/* Selector de canal */}
           <div>
             <Label className="mb-2 block">Canal</Label>
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {CHANNELS.map(c => {
-                const sel = form.channel === c.key
+                const sel = c.key === 'whatsapp_ai' ? (form.channel === 'whatsapp' && isAI) : (form.channel === c.key && !isAI)
                 const t = CHANNEL_TINT[c.tint]
                 return (
                   <button key={c.key} type="button" onClick={() => pickChannel(c.key)}
@@ -253,11 +333,19 @@ function NewCampaignForm() {
                     </>
                   )}
 
-                  <div className={cn('space-y-1.5', isEmail ? '' : 'col-span-2')}>
-                    <Label>Lista de destinatarios *</Label>
-                    <SelectMenu value={form.list_id} onChange={v => set('list_id', v)} options={listOpts} placeholder="Seleccionar lista..." className="h-[52px]" />
-                    {lists.length === 0 && <p className="text-xs text-amber-600">No tienes listas. Crea una en Contactos primero.</p>}
-                  </div>
+                  {!isAI && (
+                    <div className={cn('space-y-1.5', isEmail ? '' : 'col-span-2')}>
+                      <Label>Lista de destinatarios *</Label>
+                      <SelectMenu value={form.list_id} onChange={v => set('list_id', v)} options={listOpts} placeholder="Seleccionar lista..." className="h-[52px]" />
+                      {lists.length === 0 && <p className="text-xs text-amber-600">No tienes listas. Crea una en Contactos primero.</p>}
+                    </div>
+                  )}
+                  {isAI && (
+                    <div className="col-span-2 flex items-start gap-2.5 rounded-xl border border-teal-100 bg-teal-50 px-4 py-3 text-sm text-teal-800">
+                      <Info size={18} strokeWidth={1.75} className="mt-0.5 shrink-0 text-teal-600" />
+                      <span>Los destinatarios se cargan subiendo un Excel en el siguiente paso — no uses una lista de Contactos aquí.</span>
+                    </div>
+                  )}
 
                   {isEmail && (
                     <div className="space-y-1.5">
@@ -268,28 +356,30 @@ function NewCampaignForm() {
                   )}
 
                   {/* A quién del contacto: principal o todos */}
-                  <div className="col-span-2 space-y-1.5">
-                    <Label>¿A quién enviar de cada contacto?</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {[
-                        { val: false, title: 'Solo el principal', desc: `Un envío por contacto, a su ${isEmail ? 'correo' : 'número'} principal` },
-                        { val: true,  title: `Todos los ${isEmail ? 'correos' : 'números'}`, desc: `Un envío a cada ${isEmail ? 'correo' : 'número'} del contacto` },
-                      ].map(o => {
-                        const active = form.settings.send_to_all === o.val
-                        return (
-                          <button key={String(o.val)} type="button" onClick={() => setSetting('send_to_all', o.val)}
-                            className={cn('rounded-xl border-2 p-3 text-left transition-colors',
-                              active ? 'border-jungle-green-500 bg-jungle-green-50' : 'border-border hover:bg-muted/40')}>
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-sm font-semibold text-foreground">{o.title}</span>
-                              {active && <Check size={15} strokeWidth={2.5} className="shrink-0 text-jungle-green-600" />}
-                            </div>
-                            <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{o.desc}</p>
-                          </button>
-                        )
-                      })}
+                  {!isAI && (
+                    <div className="col-span-2 space-y-1.5">
+                      <Label>¿A quién enviar de cada contacto?</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { val: false, title: 'Solo el principal', desc: `Un envío por contacto, a su ${isEmail ? 'correo' : 'número'} principal` },
+                          { val: true,  title: `Todos los ${isEmail ? 'correos' : 'números'}`, desc: `Un envío a cada ${isEmail ? 'correo' : 'número'} del contacto` },
+                        ].map(o => {
+                          const active = form.settings.send_to_all === o.val
+                          return (
+                            <button key={String(o.val)} type="button" onClick={() => setSetting('send_to_all', o.val)}
+                              className={cn('rounded-xl border-2 p-3 text-left transition-colors',
+                                active ? 'border-jungle-green-500 bg-jungle-green-50' : 'border-border hover:bg-muted/40')}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-sm font-semibold text-foreground">{o.title}</span>
+                                {active && <Check size={15} strokeWidth={2.5} className="shrink-0 text-jungle-green-600" />}
+                              </div>
+                              <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{o.desc}</p>
+                            </button>
+                          )
+                        })}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   <div className="col-span-2 space-y-1.5">
                     <Label htmlFor="scheduled_at">Programar envío (opcional)</Label>
@@ -317,7 +407,7 @@ function NewCampaignForm() {
                     </div>
                   )}
 
-                  {!isEmail && (
+                  {!isEmail && !isAI && (
                     <div className="col-span-2 flex items-start gap-2.5 rounded-xl border border-jungle-green-100 bg-jungle-green-50 px-4 py-3 text-sm text-jungle-green-800">
                       <Info size={18} strokeWidth={1.75} className="mt-0.5 shrink-0 text-jungle-green-600" />
                       <span>El envío rota automáticamente entre tus {form.channel === 'whatsapp' ? 'números de WhatsApp conectados' : 'gateways SMS online'}, respetando sus límites diarios y horarios.</span>
@@ -354,7 +444,73 @@ function NewCampaignForm() {
                 </>
               )}
 
-              {step === 1 && !isEmail && (
+              {step === 1 && isAI && (
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <Label>Asistente IA *</Label>
+                    <SelectMenu value={assistantId}
+                      onChange={v => { setAssistantId(v); setSelectedAccIds([]); setImportInfo(null) }}
+                      options={assistants.map(a => ({ value: a.id, label: a.name, icon: <Bot size={14} className="shrink-0 text-muted-foreground" /> }))}
+                      placeholder="Selecciona un asistente..." className="h-[52px]" />
+                    {assistants.length === 0 && (
+                      <p className="text-xs text-amber-600">No tienes asistentes IA. Crea uno en <a href="/dashboard/assistants" className="font-medium underline">Asistentes IA</a>.</p>
+                    )}
+                  </div>
+
+                  {assistantId && (
+                    <>
+                      <div className="flex items-center justify-between rounded-xl border bg-muted/30 p-4">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Plantilla Excel</p>
+                          <p className="text-xs text-muted-foreground">Descarga las columnas que necesita este asistente y complétala con tus destinatarios.</p>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={downloadTemplate} disabled={templateLoading}>
+                          {templateLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} strokeWidth={1.75} />} Descargar plantilla
+                        </Button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <Label htmlFor="recipients_file">Subir Excel de destinatarios *</Label>
+                        <input id="recipients_file" type="file" accept=".xlsx,.xls,.csv" disabled={importing}
+                          onChange={e => uploadRecipients(e.target.files?.[0])}
+                          className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-jungle-green-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-jungle-green-700" />
+                        {importing && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 size={13} className="animate-spin" /> Subiendo y procesando...</p>}
+                      </div>
+
+                      {importInfo && (
+                        <div className="rounded-xl border bg-muted/30 p-3 text-sm">
+                          <p className="flex items-center gap-1.5 text-foreground"><CheckCircle size={15} className="text-jungle-green-600" /> {importInfo.total} destinatarios cargados ({importInfo.list_name}).</p>
+                          {importInfo.variables_faltantes?.length > 0 && (
+                            <p className="mt-1 flex items-start gap-1.5 text-amber-600">
+                              <AlertTriangle size={14} strokeWidth={1.75} className="mt-0.5 shrink-0" />
+                              Faltan columnas para: {importInfo.variables_faltantes.join(', ')} (quedarán vacías en el saludo).
+                            </p>
+                          )}
+                        </div>
+                      )}
+
+                      <div className="space-y-1.5">
+                        <Label>Números de WhatsApp con este asistente *</Label>
+                        {linkedAccounts.length === 0 ? (
+                          <p className="text-xs text-red-600">Ningún número tiene este asistente vinculado. Vincúlalo en Asistentes IA.</p>
+                        ) : (
+                          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                            {linkedAccounts.map(w => (
+                              <label key={w.id} className="flex cursor-pointer items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+                                <input type="checkbox" className="h-4 w-4 accent-jungle-green-600" checked={selectedAccIds.includes(w.id)}
+                                  onChange={e => setSelectedAccIds(ids => e.target.checked ? [...ids, w.id] : ids.filter(x => x !== w.id))} />
+                                <span className="truncate">{w.name} <span className="text-xs text-muted-foreground">{w.phone_number ?? ''}</span></span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {step === 1 && !isEmail && !isAI && (
                 <>
                   <div className="space-y-1.5">
                     <Label htmlFor="content_text">Mensaje *</Label>
@@ -431,7 +587,15 @@ function NewCampaignForm() {
                       <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Canal</dt><dd className="flex items-center gap-1.5 font-medium text-foreground">{chMeta && <chMeta.Icon size={14} />} {chMeta?.label}</dd></div>
                       <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Nombre</dt><dd className="truncate font-medium text-foreground">{form.name || '—'}</dd></div>
                       {isEmail && <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Asunto</dt><dd className="truncate font-medium text-foreground">{form.subject || '—'}</dd></div>}
-                      <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Lista</dt><dd className="truncate font-medium text-foreground">{selList ? `${selList.name} · ${Number(selList.total_count).toLocaleString()}` : '—'}</dd></div>
+                      {isAI ? (
+                        <>
+                          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Asistente</dt><dd className="truncate font-medium text-foreground">{assistants.find(a => a.id === assistantId)?.name ?? '—'}</dd></div>
+                          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Destinatarios</dt><dd className="truncate font-medium text-foreground">{importInfo ? `${importInfo.total} (${importInfo.list_name})` : '—'}</dd></div>
+                          <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Números</dt><dd className="font-medium text-foreground">{selectedAccIds.length} seleccionado{selectedAccIds.length !== 1 ? 's' : ''}</dd></div>
+                        </>
+                      ) : (
+                        <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Lista</dt><dd className="truncate font-medium text-foreground">{selList ? `${selList.name} · ${Number(selList.total_count).toLocaleString()}` : '—'}</dd></div>
+                      )}
                       {isEmail && <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Estrategia</dt><dd className="font-medium text-foreground">{STRATEGIES.find(s => s.value === form.strategy)?.label}</dd></div>}
                       <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Envío</dt><dd className="font-medium text-foreground">{form.scheduled_at ? new Date(form.scheduled_at).toLocaleString('es') : 'Manual (borrador)'}</dd></div>
                     </dl>

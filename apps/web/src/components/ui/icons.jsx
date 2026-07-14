@@ -5,7 +5,7 @@ export {
   LayoutDashboard, ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
   ArrowLeft, ArrowRight, ArrowUpRight, ArrowDownLeft, LogOut, Menu,
   // Comunicaciones
-  MessageCircle, MessageSquare, Inbox, Send, Megaphone, Mail,
+  MessageCircle, MessageSquare, Inbox, Send, Megaphone, Mail, Bot,
   // Canales
   Phone, PhoneCall, Smartphone, Wifi, WifiOff,
   // Acciones comunes
