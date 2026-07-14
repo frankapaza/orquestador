@@ -6,6 +6,7 @@ import { AndroidSmsAdapter } from '../channels/adapters/android-sms.adapter.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
 import { bus } from '../../lib/eventBus.js'
+import { resolveAiSettings } from '../whatsapp/warmup/ai.generator.js'
 import { join, dirname, extname } from 'path'
 import { fileURLToPath } from 'url'
 import { createWriteStream } from 'fs'
@@ -13,6 +14,36 @@ import { pipeline } from 'stream/promises'
 import crypto from 'crypto'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// Llama al proveedor (compatible OpenAI: ChatGPT/DeepSeek) y devuelve el texto.
+// Mismo patrón que assistant.responder.js (chatComplete local).
+async function chatComplete({ baseUrl, model, apiKey }, messages) {
+  const res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, messages, temperature: 0.3 }),
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '')
+    throw new Error(`IA respondió ${res.status}: ${detail.slice(0, 160)}`)
+  }
+  const data = await res.json()
+  return (data?.choices?.[0]?.message?.content ?? '').trim()
+}
+
+const AI_SUMMARY_SYSTEM = `Eres un asistente que resume conversaciones de WhatsApp/SMS entre un cliente y un asesor/negocio, en español. Genera un resumen conciso y factual con esta estructura exacta (usa estos encabezados en negrita markdown):
+
+**Intención del cliente**
+**Estado de la conversación**
+**Datos clave**
+**Próximos pasos sugeridos**
+**Sentimiento**
+
+Reglas:
+- Sé breve y directo, sin relleno.
+- En "Datos clave" incluye montos, fechas, DNI u otros datos concretos SOLO si aparecen en la conversación.
+- No inventes información que no esté en el texto.
+- Si una sección no aplica, escribe "No aplica" en esa sección.`
 
 export async function conversationsRoutes(fastify) {
   const pre = [fastify.authenticate]
@@ -360,5 +391,47 @@ export async function conversationsRoutes(fastify) {
     `
     if (!conv) return reply.code(404).send({ error: 'Conversación no encontrada' })
     return conv
+  })
+
+  // Resumen de conversación generado con IA (on-the-fly, sin persistencia).
+  fastify.post('/conversations/:id/summary', { onRequest: pre }, async (req, reply) => {
+    const [conv] = await sql`
+      SELECT * FROM conversations
+      WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!conv) return reply.code(404).send({ error: 'Conversación no encontrada' })
+
+    const messages = await sql`
+      SELECT body, direction, created_at FROM messages
+      WHERE conversation_id = ${req.params.id}
+      ORDER BY created_at ASC
+    `
+    const withBody = messages.filter(m => m.body && m.body.trim())
+    if (withBody.length === 0) {
+      return { summary: 'No hay mensajes suficientes para resumir.' }
+    }
+
+    const [cfg] = await sql`SELECT * FROM warmup_config WHERE client_id = ${req.user.sub}`
+    const settings = resolveAiSettings(cfg ?? {})
+    if (!settings.apiKey || !settings.baseUrl || !settings.model) {
+      return reply.code(400).send({ error: 'La IA (Agente IA) no está configurada. Configúrala en Calentamiento → Agente IA.' })
+    }
+
+    const transcript = withBody
+      .slice(-60)
+      .map(m => `${m.direction === 'inbound' ? 'Cliente' : 'Asistente'}: ${m.body.trim()}`)
+      .join('\n')
+
+    let summary
+    try {
+      summary = await chatComplete(settings, [
+        { role: 'system', content: AI_SUMMARY_SYSTEM },
+        { role: 'user', content: transcript },
+      ])
+    } catch (e) {
+      return reply.code(502).send({ error: 'No se pudo generar el resumen: ' + e.message })
+    }
+
+    return { summary }
   })
 }

@@ -4,7 +4,7 @@ import api from '../../../lib/api'
 import {
   Plus, Send, X, MessageCircle, Smartphone, Search, AlertTriangle, XCircle,
   Paperclip, Download, FileText, Mic, Loader2, Phone, Mail, AtSign, Users,
-  Clock, CheckCircle, ExternalLink, RotateCcw, Inbox, PhoneCall, Check,
+  Clock, CheckCircle, ExternalLink, RotateCcw, Inbox, PhoneCall, Check, Bot,
 } from '../../../components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -328,6 +328,43 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone }) {
   )
 }
 
+// ── Modal resumen IA ─────────────────────────────────────────────────────────
+function AiSummaryModal({ loading, error, summary, onClose, onRegenerate }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-2xl border bg-card shadow-xl">
+        <div className="flex items-center justify-between border-b px-6 py-4">
+          <h2 className="flex items-center gap-2 font-semibold text-foreground"><Bot size={16} strokeWidth={1.75} /> Resumen IA</h2>
+          <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8 text-muted-foreground"><X size={18} strokeWidth={1.75} /></Button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading && (
+            <div className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+              <Loader2 size={16} className="animate-spin" /> Generando resumen…
+            </div>
+          )}
+          {!loading && error && (
+            <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              <XCircle size={14} strokeWidth={1.75} /> {error}
+            </div>
+          )}
+          {!loading && !error && summary && (
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{summary}</p>
+          )}
+        </div>
+
+        <div className="flex gap-3 border-t p-4">
+          <Button type="button" variant="outline" onClick={onRegenerate} disabled={loading} className="flex-1">
+            {loading ? <><Loader2 size={14} className="animate-spin" /> Generando...</> : <><RotateCcw size={14} strokeWidth={1.75} /> Regenerar</>}
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cerrar</Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Panel derecho: detalle del contacto/conversación ─────────────────────────
 function PanelRow({ icon: Icon, label, children }) {
   return (
@@ -593,6 +630,10 @@ export default function InboxPage() {
   const [attachPreview, setAttachPreview] = useState(null)
   const [uploading, setUploading]         = useState(false)
   const [presence, setPresence]           = useState(null) // { presence, last_seen_at }
+  const [showAiSummary, setShowAiSummary]       = useState(false)
+  const [aiSummaryLoading, setAiSummaryLoading] = useState(false)
+  const [aiSummaryError, setAiSummaryError]     = useState(null)
+  const [aiSummaryText, setAiSummaryText]       = useState(null)
 
   const loadConversations = useCallback(() => {
     const params = new URLSearchParams()
@@ -741,6 +782,7 @@ export default function InboxPage() {
   async function openConversation(conv) {
     setSelected(conv)
     setPresence(null) // reset hasta confirmar
+    setShowAiSummary(false); setAiSummaryText(null); setAiSummaryError(null) // reset resumen IA al cambiar de chat
     const r = await api.get(`/conversations/${conv.id}`)
     setSelected(r.data)
     setMessages(r.data.messages ?? [])
@@ -793,6 +835,23 @@ export default function InboxPage() {
     } catch (err) {
       alert('Error: ' + (err.response?.data?.error ?? err.message))
     } finally { setSending(false); setUploading(false) }
+  }
+
+  async function generateAiSummary() {
+    if (!selected) return
+    setAiSummaryLoading(true); setAiSummaryError(null)
+    try {
+      const r = await api.post(`/conversations/${selected.id}/summary`)
+      setAiSummaryText(r.data.summary)
+    } catch (err) {
+      setAiSummaryError(err.response?.data?.error ?? err.message)
+    } finally {
+      setAiSummaryLoading(false)
+    }
+  }
+  function openAiSummary() {
+    setShowAiSummary(true)
+    generateAiSummary()
   }
 
   async function setConvStatus(status) {
@@ -962,6 +1021,7 @@ export default function InboxPage() {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                <Button variant="outline" size="sm" onClick={openAiSummary}><Bot size={12} strokeWidth={1.75} /> Resumen IA</Button>
                 {selected.status === 'closed'
                   ? <Button variant="outline" size="sm" onClick={() => setConvStatus('open')}><RotateCcw size={12} strokeWidth={1.75} /> Reabrir</Button>
                   : <Button variant="outline" size="sm" onClick={() => setConvStatus('closed')}><X size={12} strokeWidth={1.75} /> Cerrar</Button>}
@@ -1051,6 +1111,16 @@ export default function InboxPage() {
             onNewMessage={(channel, phone) => { setNewMsgOpts({ channel, phone }); setShowNew(true) }}
           />
         </div>
+      )}
+
+      {showAiSummary && selected && (
+        <AiSummaryModal
+          loading={aiSummaryLoading}
+          error={aiSummaryError}
+          summary={aiSummaryText}
+          onClose={() => setShowAiSummary(false)}
+          onRegenerate={generateAiSummary}
+        />
       )}
 
       {showNew && (
