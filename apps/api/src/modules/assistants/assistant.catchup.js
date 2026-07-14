@@ -47,6 +47,7 @@ export async function runAssistantCatchup({
       WHERE wa.assistant_id = ${asst.id}
         AND c.account_type = 'whatsapp'
         AND COALESCE(c.ai_enabled, true) = true
+        AND c.status = 'open'
         AND COALESCE(c.is_group, false) = false
         AND lm.direction = 'inbound'
         AND lm.created_at >= now() - make_interval(hours => ${windowHours})

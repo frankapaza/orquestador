@@ -16,13 +16,15 @@ const upsertSchema = z.object({
   handoff_triggers:    z.string().optional().nullable(),
   handoff_timeout_min: z.number().int().min(1).max(120).optional(),
   history_limit:       z.number().int().min(2).max(40).optional(),
+  inactivity_close_hours: z.number().int().min(0).max(720).optional(),
   is_active:           z.boolean().optional(),
 })
 
 const COLS = [
   'name', 'greeting', 'system_prompt', 'ai_provider', 'ai_model',
   'active_hours_start', 'active_hours_end', 'timezone', 'active_days',
-  'handoff_number', 'handoff_triggers', 'handoff_timeout_min', 'history_limit', 'is_active',
+  'handoff_number', 'handoff_triggers', 'handoff_timeout_min', 'history_limit',
+  'inactivity_close_hours', 'is_active',
 ]
 
 export async function assistantsRoutes(fastify) {

@@ -77,8 +77,12 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
   `
   if (!asst) return
 
-  // ¿La IA está habilitada en esta conversación? (opt-out previo / toma humana)
-  const [conv] = await sql`SELECT ai_enabled FROM conversations WHERE id = ${conversationId}`
+  // Estado y toggle de IA de la conversación.
+  const [conv] = await sql`SELECT ai_enabled, status FROM conversations WHERE id = ${conversationId}`
+  if (conv && conv.status === 'closed') {
+    console.log(`[Assistant][${instanceName}] no responde: conversación cerrada (requiere reapertura humana)`)
+    return
+  }
   if (conv && conv.ai_enabled === false) {
     console.log(`[Assistant][${instanceName}] no responde: IA desactivada en la conversación (toma humana / opt-out previo)`)
     return

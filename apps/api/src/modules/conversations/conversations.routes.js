@@ -384,10 +384,15 @@ export async function conversationsRoutes(fastify) {
       status: z.enum(['open', 'closed', 'pending'])
     }).parse(req.body)
 
+    // Cierre manual guarda motivo/fecha; reapertura los limpia.
+    const closedReason = status === 'closed' ? 'manual' : null
+    const closedAt     = status === 'closed' ? sql`now()` : sql`null`
+
     const [conv] = await sql`
-      UPDATE conversations SET status = ${status}
+      UPDATE conversations
+      SET status = ${status}, closed_reason = ${closedReason}, closed_at = ${closedAt}
       WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
-      RETURNING id, status
+      RETURNING id, status, closed_reason, closed_at
     `
     if (!conv) return reply.code(404).send({ error: 'Conversación no encontrada' })
     return conv
