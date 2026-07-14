@@ -49,3 +49,13 @@ export function fullPhone({ phone_dial, phone } = {}) {
   if (!phone) return null
   return `${phone_dial ?? ''}${phone}`
 }
+
+// Formato canónico E.164 ("+" + dígitos) para indexar conversaciones de forma
+// consistente y evitar duplicados por "+51..." vs "51...". Si la entrada no parece
+// un teléfono (muy pocos dígitos), se devuelve tal cual — NO usar con IDs de grupo.
+export function canonicalPhone(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return s
+  const digits = (s.startsWith('+') ? s.slice(1) : s).replace(/\D/g, '')
+  return digits.length >= 8 ? '+' + digits : s
+}

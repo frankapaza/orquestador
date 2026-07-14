@@ -1,13 +1,17 @@
 import { sql } from '../../lib/db.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
 import { bus } from '../../lib/eventBus.js'
+import { canonicalPhone } from '../../lib/phone.js'
 
 export async function upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType, isGroup = false }) {
+  // Homologar el teléfono a +E.164 para no duplicar la conversación por formato
+  // (+51... vs 51...). Los grupos no llevan teléfono, se dejan tal cual.
+  const cp = isGroup ? contactPhone : canonicalPhone(contactPhone)
   const [conv] = await sql`
     INSERT INTO conversations
       (client_id, channel, contact_phone, contact_name, account_id, account_type, is_group, last_message_at)
     VALUES
-      (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, ${isGroup}, now())
+      (${clientId}, ${channel}, ${cp}, ${contactName ?? null}, ${accountId}, ${accountType}, ${isGroup}, now())
     ON CONFLICT (client_id, channel, contact_phone, account_id)
     DO UPDATE SET
       last_message_at = now(),
@@ -75,11 +79,12 @@ export async function processOutgoingFromDevice({ clientId, channel, accountId, 
     if (exist) return null   // ya guardado (enviado desde la plataforma)
   }
 
+  const cp = isGroup ? contactPhone : canonicalPhone(contactPhone)
   const [conv] = await sql`
     INSERT INTO conversations
       (client_id, channel, contact_phone, contact_name, account_id, account_type, is_group, last_message_at)
     VALUES
-      (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, ${isGroup}, now())
+      (${clientId}, ${channel}, ${cp}, ${contactName ?? null}, ${accountId}, ${accountType}, ${isGroup}, now())
     ON CONFLICT (client_id, channel, contact_phone, account_id)
     DO UPDATE SET
       last_message_at = now(),
@@ -88,7 +93,7 @@ export async function processOutgoingFromDevice({ clientId, channel, accountId, 
   `
   const msg = await saveMessage({
     clientId, conversationId: conv.id, channel,
-    direction: 'outbound', to: contactPhone,
+    direction: 'outbound', to: cp,
     body, mediaUrl, mediaType, externalId, status: 'sent',
   })
 

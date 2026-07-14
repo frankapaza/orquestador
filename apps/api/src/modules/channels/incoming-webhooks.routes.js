@@ -1,11 +1,14 @@
 import { sql } from '../../lib/db.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
 import { bus } from '../../lib/eventBus.js'
+import { canonicalPhone } from '../../lib/phone.js'
 
 async function upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType }) {
+  // Homologar a +E.164 para no duplicar la conversación por formato (+51 vs 51).
+  const cp = canonicalPhone(contactPhone)
   const [conv] = await sql`
     INSERT INTO conversations (client_id, channel, contact_phone, contact_name, account_id, account_type, last_message_at)
-    VALUES (${clientId}, ${channel}, ${contactPhone}, ${contactName ?? null}, ${accountId}, ${accountType}, now())
+    VALUES (${clientId}, ${channel}, ${cp}, ${contactName ?? null}, ${accountId}, ${accountType}, now())
     ON CONFLICT (client_id, channel, contact_phone, account_id)
     DO UPDATE SET
       last_message_at = now(),

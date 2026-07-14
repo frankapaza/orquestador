@@ -4,6 +4,7 @@ import { env } from '../../config/env.js'
 import { EvolutionAdapter } from '../channels/adapters/evolution.adapter.js'
 import { AndroidSmsAdapter } from '../channels/adapters/android-sms.adapter.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
+import { canonicalPhone } from '../../lib/phone.js'
 import { dispatchWebhook } from '../webhook-subscriptions/dispatcher.js'
 import { bus } from '../../lib/eventBus.js'
 import { resolveAiSettings } from '../whatsapp/warmup/ai.generator.js'
@@ -126,12 +127,12 @@ export async function conversationsRoutes(fastify) {
       error = err.message
     }
 
-    // Crear o recuperar conversación
+    // Crear o recuperar conversación (teléfono homologado a +E.164 para no duplicar)
     const [conv] = await sql`
       INSERT INTO conversations
         (client_id, channel, contact_phone, account_id, account_type, last_message_at)
       VALUES
-        (${req.user.sub}, ${body.channel}, ${body.to}, ${account.id}, ${body.channel}, now())
+        (${req.user.sub}, ${body.channel}, ${canonicalPhone(body.to)}, ${account.id}, ${body.channel}, now())
       ON CONFLICT (client_id, channel, contact_phone, account_id)
       DO UPDATE SET last_message_at = now()
       RETURNING *
