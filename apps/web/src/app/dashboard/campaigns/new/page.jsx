@@ -237,7 +237,8 @@ function NewCampaignForm() {
   const listOpts  = lists.map(l => ({ value: l.id, label: `${l.name} · ${Number(l.total_count).toLocaleString()} contactos`, icon: <Users size={14} className="shrink-0 text-muted-foreground" /> }))
   const selList   = lists.find(l => l.id === form.list_id)
   const chMeta    = CHANNELS.find(c => c.key === (isAI ? 'whatsapp_ai' : form.channel))
-  const linkedAccounts = waAccounts.filter(w => w.assistant_id === assistantId)
+  const linkedAccounts    = waAccounts.filter(w => w.assistant_id === assistantId)
+  const connectedAccounts = linkedAccounts.filter(w => w.is_connected)
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -490,12 +491,14 @@ function NewCampaignForm() {
                       )}
 
                       <div className="space-y-1.5">
-                        <Label>Números de WhatsApp con este asistente *</Label>
+                        <Label>Números de WhatsApp conectados con este asistente *</Label>
                         {linkedAccounts.length === 0 ? (
                           <p className="text-xs text-red-600">Ningún número tiene este asistente vinculado. Vincúlalo en Asistentes IA.</p>
+                        ) : connectedAccounts.length === 0 ? (
+                          <p className="text-xs text-red-600">Los números con este asistente están desconectados. Conéctalos en WhatsApp (escanea el QR) antes de enviar.</p>
                         ) : (
                           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                            {linkedAccounts.map(w => (
+                            {connectedAccounts.map(w => (
                               <label key={w.id} className="flex cursor-pointer items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
                                 <input type="checkbox" className="h-4 w-4 accent-jungle-green-600" checked={selectedAccIds.includes(w.id)}
                                   onChange={e => setSelectedAccIds(ids => e.target.checked ? [...ids, w.id] : ids.filter(x => x !== w.id))} />
