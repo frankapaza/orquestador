@@ -7,9 +7,16 @@ import { resolveVars, buildContextFromContact } from '../assistants/assistant.va
 import { upsertConversation, saveMessage } from './message.service.js'
 
 function isWithinActiveHours(account) {
-  const now = new Date()
-  const pad = n => String(n).padStart(2, '0')
-  const current = `${pad(now.getHours())}:${pad(now.getMinutes())}`
+  // El horario se interpreta en la zona del NEGOCIO (America/Lima por defecto), NO
+  // en la del servidor (que corre en UTC). Sin esto, un horario "08:00-20:00" se
+  // corría 5h y excluía la cuenta cerca del borde → "No hay cuentas disponibles".
+  const tz = account.timezone || 'America/Lima'
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(new Date())
+  const hh = parts.find(p => p.type === 'hour')?.value ?? '00'
+  const mm = parts.find(p => p.type === 'minute')?.value ?? '00'
+  const current = `${hh}:${mm}`
   const start = account.active_hours_start?.slice(0, 5) ?? '00:00'
   const end   = account.active_hours_end?.slice(0, 5)   ?? '23:59'
   return current >= start && current <= end
