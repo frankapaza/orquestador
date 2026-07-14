@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { sql } from '../../lib/db.js'
+import { buildAssistantTemplate } from './assistant.template.js'
 
 const upsertSchema = z.object({
   name:                z.string().min(1),
@@ -102,5 +103,18 @@ export async function assistantsRoutes(fastify) {
                 WHERE client_id = ${req.user.sub} AND id IN ${sql(account_ids)}`
     }
     return { ok: true, count: account_ids.length }
+  })
+
+  // Descargar plantilla Excel con las columnas derivadas de las variables del asistente.
+  fastify.get('/whatsapp/assistants/:id/plantilla.xlsx', { onRequest: pre }, async (req, reply) => {
+    if (!adminOnly(req, reply)) return
+    const [asst] = await sql`SELECT * FROM wa_assistants WHERE id = ${req.params.id} AND client_id = ${req.user.sub}`
+    if (!asst) return reply.code(404).send({ error: 'Asistente no encontrado' })
+
+    const buf = buildAssistantTemplate(asst)
+    const safe = String(asst.name).replace(/[^a-z0-9]/gi, '_')
+    reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    reply.header('Content-Disposition', `attachment; filename="plantilla-${safe}.xlsx"`)
+    return reply.send(buf)
   })
 }
