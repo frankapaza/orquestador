@@ -23,6 +23,7 @@ import { settingsRoutes }     from './modules/settings/settings.routes.js'
 import { whatsappRoutes }     from './modules/whatsapp/whatsapp.routes.js'
 import { assistantsRoutes }   from './modules/assistants/assistants.routes.js'
 import { runAssistantCatchup } from './modules/assistants/assistant.catchup.js'
+import { runAssistantInactivityClose } from './modules/assistants/assistant.inactivity.js'
 import { smsRoutes }          from './modules/sms/sms.routes.js'
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js'
 import { incomingWebhooksRoutes } from './modules/channels/incoming-webhooks.routes.js'
@@ -148,6 +149,15 @@ if (WORKERS_DISABLED) {
       await runAssistantCatchup()
     } catch (err) {
       fastify.log.error({ err }, '[Cron] Error en catch-up de asistentes')
+    }
+  })
+
+  // Cierre por inactividad de conversaciones del asistente, cada 15 min.
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      await runAssistantInactivityClose()
+    } catch (err) {
+      fastify.log.error({ err }, '[Cron] Error en cierre por inactividad')
     }
   })
 
