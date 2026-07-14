@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import { sql } from '../../lib/db.js'
 import { enqueueCampaign, campaignQueue } from '../../workers/campaign.queue.js'
+import { parseFilePhone } from '../contacts/import.service.js'
+import { upsertContactsByPhone } from '../contacts/phone-import.service.js'
+import { extractVars } from '../assistants/assistant.vars.js'
 
 const campaignBase = z.object({
   name: z.string().min(2),
@@ -41,6 +44,64 @@ const campaignSchema = campaignBase.refine(
 
 export async function campaignsRoutes(fastify) {
   const auth = { onRequest: [fastify.authenticate] }
+
+  // Subir Excel de destinatarios (por teléfono) → crea una lista reutilizable.
+  // Query: ?assistant_id=<uuid opcional>&name=<nombre base>
+  fastify.post('/campaigns/import-recipients', auth, async (req, reply) => {
+    const file = await req.file()
+    if (!file) return reply.code(400).send({ error: 'No se recibió archivo' })
+
+    const filename = file.filename ?? 'file.xlsx'
+    const ext = filename.split('.').pop().toLowerCase()
+    if (!['csv', 'xlsx', 'xls'].includes(ext)) {
+      return reply.code(400).send({ error: 'Formato no soportado. Use .csv, .xlsx o .xls' })
+    }
+
+    const chunks = []
+    for await (const chunk of file.file) chunks.push(chunk)
+    const buffer = Buffer.concat(chunks)
+    if (buffer.length === 0) return reply.code(400).send({ error: 'El archivo está vacío' })
+    if (buffer.length > 10 * 1024 * 1024) return reply.code(400).send({ error: 'El archivo supera el límite de 10MB' })
+
+    let parsed
+    try {
+      parsed = parseFilePhone(buffer, filename)
+    } catch (err) {
+      return reply.code(422).send({ error: err.message })
+    }
+    if (parsed.contacts.length === 0) {
+      return reply.code(422).send({ error: 'No se encontraron destinatarios válidos', skipped: parsed.skipped.slice(0, 20) })
+    }
+
+    const baseName = String(req.query.name ?? 'Campaña').slice(0, 200)
+    const [list] = await sql`
+      INSERT INTO contact_lists (client_id, name, description, source)
+      VALUES (${req.user.sub}, ${baseName + ' — destinatarios'}, 'Generada desde campaña', 'campaign')
+      RETURNING *
+    `
+
+    const BATCH = 1000
+    let imported = 0
+    for (let i = 0; i < parsed.contacts.length; i += BATCH) {
+      imported += await upsertContactsByPhone(req.user.sub, list.id, parsed.contacts.slice(i, i + BATCH))
+    }
+    await sql`
+      UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${list.id})
+      WHERE id = ${list.id}
+    `
+
+    // Variables del asistente que NO vienen como columna en el Excel.
+    let variables_faltantes = []
+    if (req.query.assistant_id) {
+      const [asst] = await sql`SELECT * FROM wa_assistants WHERE id = ${req.query.assistant_id} AND client_id = ${req.user.sub}`
+      if (asst) {
+        const cols = new Set(parsed.columns.map(c => c.toUpperCase()))
+        variables_faltantes = extractVars(asst).filter(v => !cols.has(v))
+      }
+    }
+
+    return { list_id: list.id, list_name: list.name, total: imported, columns: parsed.columns, variables_faltantes }
+  })
 
   fastify.get('/campaigns', auth, async (req) => {
     return sql`
