@@ -302,7 +302,7 @@ export async function campaignsRoutes(fastify) {
 
     const jobs = statusFilter
       ? await sql`
-          SELECT cj.id, cj.recipient_email, cj.status, cj.sent_at, cj.error_message,
+          SELECT cj.id, cj.recipient_email, cj.phone_number, cj.status, cj.sent_at, cj.error_message,
                  c.first_name, c.last_name
           FROM campaign_jobs cj
           JOIN contacts c ON c.id = cj.contact_id
@@ -311,7 +311,7 @@ export async function campaignsRoutes(fastify) {
           LIMIT ${limit} OFFSET ${offset}
         `
       : await sql`
-          SELECT cj.id, cj.recipient_email, cj.status, cj.sent_at, cj.error_message,
+          SELECT cj.id, cj.recipient_email, cj.phone_number, cj.status, cj.sent_at, cj.error_message,
                  c.first_name, c.last_name
           FROM campaign_jobs cj
           JOIN contacts c ON c.id = cj.contact_id

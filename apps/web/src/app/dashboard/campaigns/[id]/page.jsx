@@ -264,7 +264,7 @@ export default function CampaignDetailPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <th className="px-5 py-3 font-medium">Email</th>
+                <th className="px-5 py-3 font-medium">{campaign.channel === 'email' ? 'Email' : 'Teléfono'}</th>
                 <th className="px-5 py-3 font-medium">Nombre</th>
                 <th className="px-5 py-3 font-medium">Estado</th>
                 <th className="px-5 py-3 font-medium">Enviado</th>
@@ -274,7 +274,7 @@ export default function CampaignDetailPage() {
             <tbody className="divide-y">
               {jobs.map(job => (
                 <tr key={job.id} className="transition-colors hover:bg-muted/40">
-                  <td className="px-5 py-3 font-mono text-xs text-foreground">{job.recipient_email}</td>
+                  <td className="px-5 py-3 font-mono text-xs text-foreground">{job.recipient_email || job.phone_number || '—'}</td>
                   <td className="px-5 py-3 text-muted-foreground">{[job.first_name, job.last_name].filter(Boolean).join(' ') || '-'}</td>
                   <td className="px-5 py-3">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${JOB_COLOR[job.status] ?? 'bg-muted text-muted-foreground'}`}>

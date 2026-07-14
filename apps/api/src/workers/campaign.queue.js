@@ -177,6 +177,10 @@ export function startCampaignWorker() {
 
   worker.on('failed', async (job, err) => {
     if (!job) return
+    // BullMQ reintenta (attempts=3); este evento dispara en CADA intento. Solo
+    // marcamos fallido y sumamos al contador cuando se agotaron los reintentos,
+    // para no contar el mismo destinatario varias veces.
+    if (job.attemptsMade < (job.opts?.attempts ?? 1)) return
     const { campaign_id, contact_id, recipient_email, phone_number } = job.data
     await sql`
       UPDATE campaign_jobs SET status = 'failed', error_message = ${err.message}
