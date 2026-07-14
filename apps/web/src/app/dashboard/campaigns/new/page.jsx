@@ -62,6 +62,10 @@ function NewCampaignForm() {
   const [recipientMode, setRecipientMode] = useState('list') // 'list' | 'upload' (para WA/SMS manual)
   const [templateLoading, setTemplateLoading] = useState(false)
 
+  // SMS de seguimiento con link wa.me (viene de la campaña de origen vía ?channel=sms&list_id=&wame=)
+  const [wameNumber, setWameNumber] = useState('')
+  const [wamePrefill, setWamePrefill] = useState('Hola, quiero continuar con mi atención')
+
   const [form, setForm] = useState({
     name: '', channel: 'email',
     subject: '', from_name: '', reply_to: '', strategy: 'smtp_own', html_content: '', text_content: '',
@@ -104,6 +108,16 @@ function NewCampaignForm() {
       .then(r => { setAssistants(r.data.assistants ?? []); setWaAccounts(r.data.accounts ?? []) })
       .catch(() => {})
   }, [isAI])
+
+  // SMS de seguimiento: llega desde el detalle de campaña con ?channel=sms&list_id=<id>&wame=<digits>
+  useEffect(() => {
+    const wameParam = searchParams.get('wame')
+    if (!wameParam) return
+    setWameNumber(wameParam)
+    pickChannel(searchParams.get('channel') || 'sms')
+    const listIdParam = searchParams.get('list_id')
+    if (listIdParam) set('list_id', listIdParam)
+  }, [])
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
   function setSetting(field, value) { setForm(f => ({ ...f, settings: { ...f.settings, [field]: value } })) }
@@ -221,7 +235,12 @@ function NewCampaignForm() {
           }
           if (form.settings.integration_id) payload.settings.integration_id = form.settings.integration_id
         } else {
-          payload.content_text = form.content_text
+          let contentText = form.content_text
+          if (wameNumber) {
+            const url = `https://wa.me/${wameNumber}?text=${encodeURIComponent(wamePrefill)}`
+            contentText = contentText.replaceAll('{{link}}', url)
+          }
+          payload.content_text = contentText
           if (form.channel === 'whatsapp' && form.media_url) {
             payload.media_url = form.media_url
             if (form.media_caption) payload.media_caption = form.media_caption
@@ -565,6 +584,15 @@ function NewCampaignForm() {
                       <p className="text-right text-xs text-muted-foreground">{form.content_text.length} caracteres</p>
                     )}
                   </div>
+                  {wameNumber && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="wame_prefill">Texto prellenado del WhatsApp (lo que verá escrito el cliente al abrir el chat)</Label>
+                      <Input id="wame_prefill" value={wamePrefill} onChange={e => setWamePrefill(e.target.value)} className={fieldClass} />
+                      <p className="text-xs text-muted-foreground">
+                        Usa <code>{'{{link}}'}</code> en tu mensaje para insertar el enlace. Ej: "Hola {'{{nombre}}'}, escríbenos aquí: {'{{link}}'}"
+                      </p>
+                    </div>
+                  )}
                   {form.channel === 'whatsapp' && (
                     <div className="grid grid-cols-1 gap-4 rounded-xl border bg-muted/30 p-4">
                       <p className="flex items-center gap-2 text-xs font-semibold text-muted-foreground"><Image size={14} /> Adjuntar media (opcional)</p>
