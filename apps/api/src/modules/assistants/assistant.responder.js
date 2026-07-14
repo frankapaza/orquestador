@@ -78,7 +78,7 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
   if (!asst) return
 
   // Estado y toggle de IA de la conversación.
-  const [conv] = await sql`SELECT ai_enabled, status FROM conversations WHERE id = ${conversationId}`
+  const [conv] = await sql`SELECT ai_enabled, status, contact_phone FROM conversations WHERE id = ${conversationId}`
   if (conv && conv.status === 'closed') {
     console.log(`[Assistant][${instanceName}] no responde: conversación cerrada (requiere reapertura humana)`)
     return
@@ -140,9 +140,21 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
   if (!reply) return
 
   try {
-    await baileysManager.send(instanceName, { to: digits(contactPhone), body: reply })
-    // El envío se registra en el inbox por el eco fromMe (processOutgoingFromDevice).
+    const sent = await baileysManager.send(instanceName, { to: digits(contactPhone), body: reply })
+    const externalId = sent?.key?.id ?? sent?.id ?? null
+    // Registrar el saliente en la BD. El eco fromMe solo captura mensajes enviados
+    // desde el teléfono físico, NO los enviados por API como este. Sin este registro
+    // el catch-up cree que el entrante sigue sin responder y re-contesta EN LOOP, y
+    // el inbox no muestra las respuestas del asistente.
+    await sql`
+      INSERT INTO messages
+        (client_id, conversation_id, channel, direction, from_number, to_number, body, external_id, status, sent_at)
+      VALUES
+        (${clientId}, ${conversationId}, 'whatsapp', 'outbound', NULL,
+         ${conv?.contact_phone ?? contactPhone}, ${reply}, ${externalId}, 'sent', now())
+    `
+    await sql`UPDATE conversations SET last_message_at = now() WHERE id = ${conversationId}`
   } catch (e) {
-    console.error(`[Assistant][${instanceName}] envío:`, e.message)
+    console.error(`[Assistant][${instanceName}] registro/envío:`, e.message)
   }
 }
