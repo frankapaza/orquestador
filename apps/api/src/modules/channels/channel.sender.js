@@ -4,6 +4,7 @@ import { AndroidSmsAdapter } from './adapters/android-sms.adapter.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
 import { fullPhone } from '../../lib/phone.js'
 import { resolveVars, buildContextFromContact } from '../assistants/assistant.vars.js'
+import { upsertConversation, saveMessage } from './message.service.js'
 
 function isWithinActiveHours(account) {
   const now = new Date()
@@ -52,18 +53,25 @@ export async function pickSmsAccount(clientId) {
 // Solo se puede consultar por Baileys; con otros proveedores no bloqueamos.
 // Si el chequeo falla por red/transitorio, devolvemos true para no descartar
 // números válidos por un error puntual (mejor enviar que perder el mensaje).
-export async function isWhatsappNumber({ contact, account }) {
-  if (account.provider !== 'baileys') return true
+// Valida (anti-baneo) que el número tenga WhatsApp y resuelve el JID canónico al
+// que hay que enviar. Devuelve { valid, jid, checked }:
+//   valid   = se puede enviar (número con WhatsApp, o proveedor no verificable)
+//   jid     = JID exacto de onWhatsApp para enviar (null → armar desde el número)
+//   checked = si realmente se verificó (para no descartar por error transitorio)
+export async function checkWhatsappTarget({ contact, account }) {
+  if (account.provider !== 'baileys') return { valid: true, jid: null, checked: false }
   const phone = fullPhone(contact) ?? contact.metadata?.phone ?? contact.phone_number ?? null
-  if (!phone) return false
+  if (!phone) return { valid: false, jid: null, checked: true }
   try {
-    return await baileysManager.isOnWhatsApp(account.instance_name, phone)
+    const jid = await baileysManager.isOnWhatsApp(account.instance_name, phone)
+    return { valid: !!jid, jid, checked: true }
   } catch {
-    return true
+    // Error transitorio en la consulta → no descartar; enviar al JID construido.
+    return { valid: true, jid: null, checked: false }
   }
 }
 
-export async function sendWhatsapp({ campaign, contact, account }) {
+export async function sendWhatsapp({ campaign, contact, account, jid = null }) {
   // El número se guarda separado (phone_dial + phone). Aquí se concatena el completo.
   const phone = fullPhone(contact) ?? contact.metadata?.phone ?? null
   if (!phone) throw new Error('Contacto sin número de teléfono')
@@ -80,6 +88,7 @@ export async function sendWhatsapp({ campaign, contact, account }) {
 
   const payload = {
     to:           phone,
+    jid,          // JID verificado por onWhatsApp (mejor entrega); null → se arma del número
     body,
     mediaUrl:     campaign.media_url ?? undefined,
     mediaType:    campaign.settings?.media_type ?? 'image',
@@ -100,7 +109,28 @@ export async function sendWhatsapp({ campaign, contact, account }) {
     WHERE id = ${account.id}
   `
 
-  return result?.key?.id ?? result?.id ?? null
+  const messageId = result?.key?.id ?? result?.id ?? null
+
+  // Campaña IA: registrar el saludo como mensaje de conversación → aparece en el
+  // Inbox y el acuse de entrega (✓✓ entregado / leído) se actualiza solo vía los
+  // recibos de Baileys (messages.update → updateMessageStatus por external_id).
+  if (campaign.assistant_id && messageId) {
+    try {
+      const contactName = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || null
+      const conv = await upsertConversation({
+        clientId: campaign.client_id, channel: 'whatsapp', contactPhone: phone,
+        contactName, accountId: account.id, accountType: 'whatsapp',
+      })
+      await saveMessage({
+        clientId: campaign.client_id, conversationId: conv.id, channel: 'whatsapp',
+        direction: 'outbound', to: phone, body, externalId: messageId, status: 'sent',
+      })
+    } catch (e) {
+      console.error('[Campaign][WA] registrar saludo en conversación:', e.message)
+    }
+  }
+
+  return messageId
 }
 
 export async function sendSms({ campaign, contact, account }) {

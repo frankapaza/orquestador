@@ -509,18 +509,22 @@ class BaileysManager {
     const s = this.sessions.get(name)
     if (!s?.socket || s.status !== 'connected') throw new Error('WhatsApp no conectado')
     const digits = String(phone ?? '').replace(/\D/g, '')
-    if (!digits) return false
+    if (!digits) return null
     const res = await s.socket.onWhatsApp(digits)
     const hit = Array.isArray(res) ? res[0] : null
-    return !!hit?.exists
+    // Devuelve el JID canónico de WhatsApp (puede diferir de digits@s.whatsapp.net);
+    // hay que ENVIAR a ese JID para que se entregue. null = el número no tiene WhatsApp.
+    return hit?.exists ? (hit.jid ?? null) : null
   }
 
-  async send(name, { to, body, mediaUrl, mediaType, mediaCaption }) {
+  async send(name, { to, jid: jidOverride, body, mediaUrl, mediaType, mediaCaption }) {
     const s = this.sessions.get(name)
     if (!s?.socket) throw new Error('Sesión no activa')
     if (s.status !== 'connected') throw new Error('WhatsApp no conectado. Vincula el número primero.')
 
-    const jid = this.toJid(to)
+    // Usa el JID verificado por onWhatsApp si se pasó (evita fallos de entrega cuando
+    // el JID real difiere del construido a mano); si no, lo arma desde el número.
+    const jid = jidOverride || this.toJid(to)
 
     if (mediaUrl) {
       const typeMap = {

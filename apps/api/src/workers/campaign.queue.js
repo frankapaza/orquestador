@@ -3,7 +3,7 @@ import { redis } from '../lib/redis.js'
 import { sql } from '../lib/db.js'
 import { pickEmailAccount, sendOneEmail } from '../modules/sending/smtp.sender.js'
 import { getAdapterForCampaign } from '../modules/integrations/adapters/factory.js'
-import { pickWhatsappAccount, pickSmsAccount, sendWhatsapp, sendSms, isWhatsappNumber, randomDelay } from '../modules/channels/channel.sender.js'
+import { pickWhatsappAccount, pickSmsAccount, sendWhatsapp, sendSms, checkWhatsappTarget, randomDelay } from '../modules/channels/channel.sender.js'
 import { env } from '../config/env.js'
 
 const QUEUE_NAME = 'campaign-jobs'
@@ -117,10 +117,11 @@ export function startCampaignWorker() {
         })
         if (!account) throw new Error('No hay cuentas WhatsApp disponibles con cuota (o ninguna con el asistente vinculado)')
 
-        // Anti-baneo: validar que el número tenga WhatsApp ANTES de escribir.
-        // Los inválidos se marcan 'invalid' (reporte aparte), sin enviar ni reintentar.
-        const exists = await isWhatsappNumber({ contact: sendContact, account })
-        if (!exists) {
+        // Anti-baneo: validar que el número tenga WhatsApp ANTES de escribir, y
+        // obtener el JID exacto (mejor entrega). Solo marcamos 'invalid' si se pudo
+        // verificar y el número NO tiene WhatsApp (un error transitorio no descarta).
+        const chk = await checkWhatsappTarget({ contact: sendContact, account })
+        if (chk.checked && !chk.valid) {
           await sql`
             UPDATE campaign_jobs
             SET status = 'invalid', error_message = 'El número no tiene WhatsApp',
@@ -131,7 +132,7 @@ export function startCampaignWorker() {
           return { invalid: true }
         }
 
-        messageId = await sendWhatsapp({ campaign, contact: sendContact, account })
+        messageId = await sendWhatsapp({ campaign, contact: sendContact, account, jid: chk.jid })
         accountId = account.id
 
       } else if (channel === 'sms') {
