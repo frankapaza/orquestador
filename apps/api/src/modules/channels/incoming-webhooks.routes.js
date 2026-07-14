@@ -278,6 +278,30 @@ export async function incomingWebhooksRoutes(fastify) {
       }
     }
 
+    // Entrega confirmada por el operador → el SMS llegó al destinatario.
+    if (event?.event === 'sms:delivered' || event?.state === 'Delivered') {
+      const externalId = (event?.payload ?? event)?.id ?? null
+      if (externalId) {
+        await sql`
+          UPDATE messages SET status = 'delivered', delivered_at = now()
+          WHERE external_id = ${externalId} AND client_id = ${account.client_id}
+        `
+      }
+    }
+
+    // Falló en el operador/teléfono → el SMS NO se entregó.
+    if (event?.event === 'sms:failed' || event?.state === 'Failed') {
+      const payload    = event?.payload ?? event
+      const externalId = payload?.id ?? null
+      const reason     = payload?.reason ?? payload?.error ?? 'Falló en el operador'
+      if (externalId) {
+        await sql`
+          UPDATE messages SET status = 'failed', error_message = ${reason}
+          WHERE external_id = ${externalId} AND client_id = ${account.client_id}
+        `
+      }
+    }
+
     return reply.code(200).send({ ok: true })
   })
 }

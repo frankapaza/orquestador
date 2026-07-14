@@ -8,16 +8,23 @@ function webhookUrlFor(accountId) {
   return `${env.TRACKING_BASE_URL.replace(/\/$/, '')}/webhooks/sms/${accountId}`
 }
 
-// Registra (best-effort) el webhook de SMS entrante en el gateway de la cuenta.
+// Eventos que registramos en el gateway para CADA cuenta SMS (automático al
+// crear/editar). 'received' = SMS entrantes; 'sent'/'delivered'/'failed' = estado
+// de entrega real → así el inbox muestra si el SMS se entregó o falló en el operador.
+const SMS_WEBHOOK_EVENTS = ['sms:received', 'sms:sent', 'sms:delivered', 'sms:failed']
+
+// Registra (best-effort) los webhooks de SMS en el gateway de la cuenta.
 // No lanza: si el gateway está offline o falla, solo se loguea — el alta/edición
-// de la cuenta no debe romperse por esto.
+// de la cuenta no debe romperse por esto. registerWebhook es idempotente.
 async function syncIncomingWebhook(fastify, account) {
   try {
     const adapter = new AndroidSmsAdapter(account)
-    await adapter.registerWebhook(webhookUrlFor(account.id), 'sms:received')
-    fastify.log.info(`[SMS] Webhook entrante registrado en gateway para cuenta ${account.id}`)
+    for (const ev of SMS_WEBHOOK_EVENTS) {
+      await adapter.registerWebhook(webhookUrlFor(account.id), ev)
+    }
+    fastify.log.info(`[SMS] Webhooks (entrante + estado de entrega) registrados en gateway para cuenta ${account.id}`)
   } catch (err) {
-    fastify.log.warn({ err }, `[SMS] No se pudo registrar el webhook entrante para cuenta ${account.id}`)
+    fastify.log.warn({ err }, `[SMS] No se pudieron registrar los webhooks para cuenta ${account.id}`)
   }
 }
 
@@ -209,9 +216,9 @@ export async function smsRoutes(fastify) {
     const url = webhookUrlFor(account.id)
     const adapter = new AndroidSmsAdapter(account)
     try {
-      const webhook    = await adapter.registerWebhook(url, 'sms:received')
+      for (const ev of SMS_WEBHOOK_EVENTS) await adapter.registerWebhook(url, ev)
       const registered = await adapter.listWebhooks().catch(() => [])
-      return { ok: true, url, webhook, registered }
+      return { ok: true, url, events: SMS_WEBHOOK_EVENTS, registered }
     } catch (err) {
       return reply.code(502).send({ ok: false, url, error: err.message, status: err.status ?? null })
     }
