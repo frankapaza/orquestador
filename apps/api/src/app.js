@@ -22,6 +22,7 @@ import { adminRoutes }        from './modules/admin/admin.routes.js'
 import { settingsRoutes }     from './modules/settings/settings.routes.js'
 import { whatsappRoutes }     from './modules/whatsapp/whatsapp.routes.js'
 import { assistantsRoutes }   from './modules/assistants/assistants.routes.js'
+import { runAssistantCatchup } from './modules/assistants/assistant.catchup.js'
 import { smsRoutes }          from './modules/sms/sms.routes.js'
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js'
 import { incomingWebhooksRoutes } from './modules/channels/incoming-webhooks.routes.js'
@@ -136,6 +137,17 @@ if (WORKERS_DISABLED) {
       await runWarmupTick()
     } catch (err) {
       fastify.log.error({ err }, '[Cron] Error en tick de warmup')
+    }
+  })
+
+  // Asistente "ponerse al día": cada 5 min responde conversaciones cuyo último
+  // mensaje es del cliente sin contestar (últimas 12h), para asistentes dentro de
+  // su horario. Espaciado anti-baneo y con tope por corrida.
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      await runAssistantCatchup()
+    } catch (err) {
+      fastify.log.error({ err }, '[Cron] Error en catch-up de asistentes')
     }
   })
 

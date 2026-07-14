@@ -239,6 +239,7 @@ function NewCampaignForm() {
   const chMeta    = CHANNELS.find(c => c.key === (isAI ? 'whatsapp_ai' : form.channel))
   const linkedAccounts    = waAccounts.filter(w => w.assistant_id === assistantId)
   const connectedAccounts = linkedAccounts.filter(w => w.is_connected)
+  const selAssistant      = assistants.find(a => a.id === assistantId)
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -455,6 +456,11 @@ function NewCampaignForm() {
                       placeholder="Selecciona un asistente..." className="h-[52px]" />
                     {assistants.length === 0 && (
                       <p className="text-xs text-amber-600">No tienes asistentes IA. Crea uno en <a href="/dashboard/assistants" className="font-medium underline">Asistentes IA</a>.</p>
+                    )}
+                    {selAssistant && (
+                      <p className="text-xs text-muted-foreground">
+                        ⏰ Este asistente responde de <strong>{selAssistant.active_hours_start?.slice(0,5)}–{selAssistant.active_hours_end?.slice(0,5)}</strong> ({selAssistant.active_days}, {selAssistant.timezone}). Fuera de ese horario recibe los mensajes pero no responde hasta volver a su horario.
+                      </p>
                     )}
                   </div>
 

@@ -79,23 +79,36 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
 
   // ¿La IA está habilitada en esta conversación? (opt-out previo / toma humana)
   const [conv] = await sql`SELECT ai_enabled FROM conversations WHERE id = ${conversationId}`
-  if (conv && conv.ai_enabled === false) return
+  if (conv && conv.ai_enabled === false) {
+    console.log(`[Assistant][${instanceName}] no responde: IA desactivada en la conversación (toma humana / opt-out previo)`)
+    return
+  }
 
   // Opt-out: el cliente pide no recibir más → apagar la IA en la conversación.
   if (OPT_OUT.test(text)) {
     await sql`UPDATE conversations SET ai_enabled = false WHERE id = ${conversationId}`
+    console.log(`[Assistant][${instanceName}] no responde: opt-out del cliente ("${text.trim().slice(0, 40)}") → IA apagada en la conversación`)
     return
   }
 
   // Respetar horario / días activos del asistente.
-  if (!isActiveNow(asst)) return
+  if (!isActiveNow(asst)) {
+    console.log(`[Assistant][${instanceName}] no responde: fuera del horario del asistente "${asst.name}" (${asst.active_hours_start?.slice(0,5)}-${asst.active_hours_end?.slice(0,5)}, ${asst.active_days}, ${asst.timezone})`)
+    return
+  }
 
   // Ajustes de IA: key global del cliente (Agente IA), con override de modelo.
   const [cfg] = await sql`SELECT * FROM warmup_config WHERE client_id = ${clientId}`
-  if (!cfg) return
+  if (!cfg) {
+    console.log(`[Assistant][${instanceName}] no responde: IA no configurada (sin warmup_config para el cliente)`)
+    return
+  }
   const settings = resolveAiSettings(cfg)
   if (asst.ai_model) settings.model = asst.ai_model
-  if (!settings.apiKey || !settings.baseUrl || !settings.model) return
+  if (!settings.apiKey || !settings.baseUrl || !settings.model) {
+    console.log(`[Assistant][${instanceName}] no responde: Agente IA incompleto (falta API key, base URL o modelo)`)
+    return
+  }
 
   const ctx     = await buildContext(clientId, contactPhone, contactName)
   const prompt  = resolveVars(asst.system_prompt, ctx)
