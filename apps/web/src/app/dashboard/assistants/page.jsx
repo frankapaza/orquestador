@@ -16,7 +16,7 @@ const EMPTY = {
   active_hours_start: '09:00', active_hours_end: '18:00',
   timezone: 'America/Lima', active_days: 'mon,tue,wed,thu,fri',
   handoff_number: '', handoff_triggers: 'asesor,humano,persona,operador,ejecutivo',
-  handoff_timeout_min: 5, history_limit: 12, ai_model: '', is_active: true,
+  handoff_timeout_min: 5, history_limit: 12, inactivity_close_hours: 24, ai_model: '', is_active: true,
 }
 
 const input = 'w-full rounded-xl border border-transparent bg-muted/60 px-3 py-2 text-sm transition-colors focus:border-ring focus:bg-background focus:outline-none'
@@ -62,6 +62,7 @@ export default function AssistantsPage() {
       timezone: a.timezone ?? 'America/Lima', active_days: a.active_days ?? 'mon,tue,wed,thu,fri',
       handoff_number: a.handoff_number ?? '', handoff_triggers: a.handoff_triggers ?? '',
       handoff_timeout_min: a.handoff_timeout_min ?? 5, history_limit: a.history_limit ?? 12,
+      inactivity_close_hours: a.inactivity_close_hours ?? 24,
       ai_model: a.ai_model ?? '', is_active: a.is_active !== false,
     })
     setAccIds(a.account_ids ?? [])
@@ -78,6 +79,7 @@ export default function AssistantsPage() {
         timezone: form.timezone, active_days: form.active_days,
         handoff_number: form.handoff_number || null, handoff_triggers: form.handoff_triggers || null,
         handoff_timeout_min: Number(form.handoff_timeout_min), history_limit: Number(form.history_limit),
+        inactivity_close_hours: Number(form.inactivity_close_hours),
         ai_model: form.ai_model || null, is_active: !!form.is_active,
       }
       const id = editingId
@@ -206,6 +208,12 @@ export default function AssistantsPage() {
                   </select>
                 </div>
                 <div><span className={label}>Contexto (msgs)</span><input type="number" min={2} max={40} className={`mt-1 ${input}`} value={form.history_limit} onChange={e => setField('history_limit', e.target.value)} /></div>
+              </div>
+
+              <div>
+                <span className={label}>Cerrar conversación tras (horas sin actividad)</span>
+                <input type="number" min={0} max={720} className={`mt-1 ${input}`} value={form.inactivity_close_hours} onChange={e => setField('inactivity_close_hours', e.target.value)} />
+                <p className="mt-1 text-[11px] text-muted-foreground">0 = nunca cerrar por inactividad. Default 24h.</p>
               </div>
 
               <div>
