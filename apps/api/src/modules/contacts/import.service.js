@@ -116,7 +116,7 @@ function mapRowsByPhone(headers, rows) {
     const row = rows[i]
     const phoneRaw = String(row[phoneCol] ?? '').trim()
     const digits = phoneRaw.replace(/\D/g, '')
-    if (!digits || digits.length < 5) {
+    if (!digits || digits.length < 6) {
       skipped.push({ row: i + 2, value: phoneRaw || '(vacio)', reason: 'telefono invalido' })
       continue
     }

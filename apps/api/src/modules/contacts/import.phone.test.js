@@ -15,7 +15,7 @@ test('parseFilePhone: teléfono como clave, resto a metadata, email opcional', (
 })
 
 test('parseFilePhone: fila sin teléfono se descarta', () => {
-  const r = parseFilePhone(csv('telefono,nombre\n,SinTel\n51988,Ok\n'), 'x.csv')
+  const r = parseFilePhone(csv('telefono,nombre\n,SinTel\n51988777,Ok\n'), 'x.csv')
   assert.equal(r.valid, 1)
   assert.equal(r.contacts[0].first_name, 'Ok')
 })
