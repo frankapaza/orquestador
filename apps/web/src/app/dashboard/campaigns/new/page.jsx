@@ -59,6 +59,7 @@ function NewCampaignForm() {
   const [selectedAccIds, setSelectedAccIds] = useState([])
   const [importInfo, setImportInfo] = useState(null) // { list_id, list_name, total, columns, variables_faltantes }
   const [importing, setImporting] = useState(false)
+  const [recipientMode, setRecipientMode] = useState('list') // 'list' | 'upload' (para WA/SMS manual)
   const [templateLoading, setTemplateLoading] = useState(false)
 
   const [form, setForm] = useState({
@@ -154,8 +155,9 @@ function NewCampaignForm() {
       const q = `?assistant_id=${assistantId}&name=${encodeURIComponent(form.name || 'Campaña')}`
       const r = await api.post(`/campaigns/import-recipients${q}`, fd)
       setImportInfo(r.data)
+      set('list_id', r.data.list_id) // para WA/SMS manual: el envío usa form.list_id
     } catch (err) {
-      alert(err?.response?.data?.error ?? 'Error al subir el Excel')
+      setError(err?.response?.data?.error ?? 'Error al subir el archivo')
     } finally { setImporting(false) }
   }
 
@@ -338,8 +340,33 @@ function NewCampaignForm() {
                   {!isAI && (
                     <div className={cn('space-y-1.5', isEmail ? '' : 'col-span-2')}>
                       <Label>Lista de destinatarios *</Label>
-                      <SelectMenu value={form.list_id} onChange={v => set('list_id', v)} options={listOpts} placeholder="Seleccionar lista..." className="h-[52px]" />
-                      {lists.length === 0 && <p className="text-xs text-amber-600">No tienes listas. Crea una en Contactos primero.</p>}
+                      {!isEmail && (
+                        <div className="mb-1.5 flex gap-2">
+                          <button type="button" onClick={() => setRecipientMode('list')}
+                            className={cn('rounded-lg px-3 py-1.5 text-xs font-medium transition-colors', recipientMode === 'list' ? 'bg-jungle-green-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted/70')}>
+                            Elegir lista
+                          </button>
+                          <button type="button" onClick={() => setRecipientMode('upload')}
+                            className={cn('rounded-lg px-3 py-1.5 text-xs font-medium transition-colors', recipientMode === 'upload' ? 'bg-jungle-green-600 text-white' : 'bg-muted text-muted-foreground hover:bg-muted/70')}>
+                            Subir Excel/CSV
+                          </button>
+                        </div>
+                      )}
+                      {(isEmail || recipientMode === 'list') ? (
+                        <>
+                          <SelectMenu value={form.list_id} onChange={v => set('list_id', v)} options={listOpts} placeholder="Seleccionar lista..." className="h-[52px]" />
+                          {lists.length === 0 && <p className="text-xs text-amber-600">No tienes listas. Crea una en Contactos primero.</p>}
+                        </>
+                      ) : (
+                        <>
+                          <input id="recipients_file_manual" type="file" accept=".xlsx,.xls,.csv" disabled={importing}
+                            onChange={e => uploadRecipients(e.target.files?.[0])}
+                            className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-jungle-green-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-jungle-green-700" />
+                          <p className="text-xs text-muted-foreground">Excel/CSV con una columna de teléfono (telefono, celular, phone…). Se creará una lista automáticamente. El email es opcional.</p>
+                          {importing && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 size={13} className="animate-spin" /> Subiendo y procesando...</p>}
+                          {importInfo && <p className="flex items-center gap-1.5 text-xs text-foreground"><CheckCircle size={14} className="text-jungle-green-600" /> {importInfo.total} destinatarios cargados ({importInfo.list_name}).</p>}
+                        </>
+                      )}
                     </div>
                   )}
                   {isAI && (
