@@ -304,29 +304,31 @@ export async function campaignsRoutes(fastify) {
     const offset = (page - 1) * limit
     const statusFilter = req.query.status ?? null
 
-    const jobs = statusFilter
-      ? await sql`
-          SELECT cj.id, cj.recipient_email, cj.phone_number, cj.status, cj.sent_at, cj.error_message,
-                 c.first_name, c.last_name
-          FROM campaign_jobs cj
-          JOIN contacts c ON c.id = cj.contact_id
-          WHERE cj.campaign_id = ${req.params.id} AND cj.status = ${statusFilter}
-          ORDER BY cj.sent_at DESC NULLS LAST, cj.created_at
-          LIMIT ${limit} OFFSET ${offset}
-        `
-      : await sql`
-          SELECT cj.id, cj.recipient_email, cj.phone_number, cj.status, cj.sent_at, cj.error_message,
-                 c.first_name, c.last_name
-          FROM campaign_jobs cj
-          JOIN contacts c ON c.id = cj.contact_id
-          WHERE cj.campaign_id = ${req.params.id}
-          ORDER BY cj.sent_at DESC NULLS LAST, cj.created_at
-          LIMIT ${limit} OFFSET ${offset}
-        `
+    // "undelivered" = enviado pero el saludo no llegó (sin delivered/read).
+    const whereStatus =
+      statusFilter === 'undelivered'
+        ? sql`AND cj.status = 'sent' AND COALESCE(m.status, 'sent') NOT IN ('delivered', 'read')`
+        : statusFilter
+          ? sql`AND cj.status = ${statusFilter}`
+          : sql``
 
-    const [{ count }] = statusFilter
-      ? await sql`SELECT COUNT(*) FROM campaign_jobs WHERE campaign_id = ${req.params.id} AND status = ${statusFilter}`
-      : await sql`SELECT COUNT(*) FROM campaign_jobs WHERE campaign_id = ${req.params.id}`
+    const jobs = await sql`
+      SELECT cj.id, cj.recipient_email, cj.phone_number, cj.status, cj.sent_at, cj.error_message,
+             c.first_name, c.last_name, m.status AS delivery_status
+      FROM campaign_jobs cj
+      JOIN contacts c ON c.id = cj.contact_id
+      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub}
+      WHERE cj.campaign_id = ${req.params.id} ${whereStatus}
+      ORDER BY cj.sent_at DESC NULLS LAST, cj.created_at
+      LIMIT ${limit} OFFSET ${offset}
+    `
+
+    const [{ count }] = await sql`
+      SELECT COUNT(*)
+      FROM campaign_jobs cj
+      LEFT JOIN messages m ON m.external_id = cj.message_id AND m.client_id = ${req.user.sub}
+      WHERE cj.campaign_id = ${req.params.id} ${whereStatus}
+    `
 
     return { jobs, total: parseInt(count), page, limit, pages: Math.ceil(parseInt(count) / limit) }
   })
