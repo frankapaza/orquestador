@@ -137,6 +137,9 @@ export async function smsRoutes(fastify) {
   fastify.patch('/sms/accounts/:id', { onRequest: pre }, async (req, reply) => {
     if (req.user.member_id) return reply.code(403).send({ error: 'Solo el administrador puede editar cuentas' })
     const body = createSchema.omit({ assigned_member_id: true }).partial().parse(req.body)
+    // api_key = '' (cadena vacía explícita) → limpiar la credencial (cuenta sin auth).
+    // Nota: omitirla del body = "no tocar" (conserva la actual); esto es lo contrario.
+    if (body.api_key === '') body.api_key = null
     if (Object.keys(body).length === 0) return reply.code(400).send({ error: 'Nada que actualizar' })
 
     const [account] = await sql`

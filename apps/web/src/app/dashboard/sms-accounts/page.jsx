@@ -68,6 +68,7 @@ export default function SmsAccountsPage() {
   const [form, setForm]               = useState(EMPTY)
   const [phoneCountry, setPhoneCountry] = useState(DEFAULT_COUNTRY)
   const [phoneNum, setPhoneNum]         = useState('')
+  const [clearApiKey, setClearApiKey]   = useState(false)
   const [loading, setLoading]         = useState(false)
   const [error, setError]             = useState(null)
   const [pinging, setPinging]         = useState(null)
@@ -100,6 +101,7 @@ export default function SmsAccountsPage() {
     setPhoneCountry(c)
     setPhoneNum(nationalNumber(acc.phone_number ?? '', c))
     setEditingId(acc.id)
+    setClearApiKey(false)
     setShowForm(true)
     setError(null)
   }
@@ -110,6 +112,7 @@ export default function SmsAccountsPage() {
     setForm(EMPTY)
     setPhoneCountry(DEFAULT_COUNTRY)
     setPhoneNum('')
+    setClearApiKey(false)
     setError(null)
   }
 
@@ -128,7 +131,7 @@ export default function SmsAccountsPage() {
         delay_max:          Number(form.delay_max),
         active_hours_start: form.active_hours_start,
         active_hours_end:   form.active_hours_end,
-        ...(form.api_key ? { api_key: form.api_key } : {}),
+        ...(clearApiKey ? { api_key: '' } : (form.api_key ? { api_key: form.api_key } : {})),
       }
       if (editingId) {
         await api.patch(`/sms/accounts/${editingId}`, payload)
@@ -302,8 +305,15 @@ export default function SmsAccountsPage() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="flex items-center text-foreground">API Key <HelpTooltip text="Token de la app. En Android SMS Gateway → Configuración → API Key. Déjalo vacío si no tiene autenticación." /></Label>
-                <Input {...field('api_key')} type="password" placeholder="Dejar vacío si no tiene autenticación" className={inputCls} />
+                <Label className="flex items-center text-foreground">API Key <HelpTooltip text="Token/credencial de la app SMS Gate de ESE teléfono. Cada teléfono debe tener la suya (si dos cuentas comparten api_key, envían desde el mismo SIM)." /></Label>
+                <Input {...field('api_key')} type="password" disabled={clearApiKey}
+                  placeholder={editingId ? 'Vacío = mantener la actual' : 'Dejar vacío si no tiene autenticación'} className={inputCls} />
+                {editingId && (
+                  <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <input type="checkbox" checked={clearApiKey} onChange={e => setClearApiKey(e.target.checked)} />
+                    Limpiar credencial (dejar esta cuenta SIN api_key)
+                  </label>
+                )}
               </div>
 
               <div className="space-y-3 rounded-xl bg-muted/40 p-4">
