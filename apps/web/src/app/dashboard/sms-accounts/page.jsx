@@ -396,6 +396,14 @@ export default function SmsAccountsPage() {
                 </span>
               </div>
 
+              {/* Alerta: credenciales (api_key) duplicadas → mismo teléfono/SIM */}
+              {acc.shares_apikey && (
+                <div className="mx-5 mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  <span aria-hidden>⚠</span>
+                  <span>Comparte credenciales (api_key) con <strong>{acc.shares_with.join(', ')}</strong> → todas envían desde el mismo teléfono/SIM. Usa credenciales distintas por número.</span>
+                </div>
+              )}
+
               {/* Métricas */}
               <div className="mx-5 mb-4 grid grid-cols-3 gap-2">
                 <div className="rounded-lg bg-muted/40 p-2 text-center">

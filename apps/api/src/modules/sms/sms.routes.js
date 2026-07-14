@@ -57,32 +57,49 @@ export async function smsRoutes(fastify) {
 
   // Listar cuentas — asesores solo ven la suya
   fastify.get('/sms/accounts', { onRequest: pre }, async (req) => {
-    if (req.user.member_id) {
-      return sql`
-        SELECT sa.id, sa.name, sa.phone_number, sa.gateway_url,
-               sa.daily_limit, sa.sent_today, sa.delay_min, sa.delay_max,
-               sa.active_hours_start, sa.active_hours_end,
-               sa.is_online, sa.is_active, sa.last_used_at, sa.created_at,
-               sa.assigned_member_id
-        FROM sms_accounts sa
-        WHERE sa.client_id = ${req.user.sub}
-          AND sa.assigned_member_id = ${req.user.member_id}
-        ORDER BY sa.created_at DESC
-      `
+    const rows = req.user.member_id
+      ? await sql`
+          SELECT sa.id, sa.name, sa.phone_number, sa.gateway_url, sa.api_key,
+                 sa.daily_limit, sa.sent_today, sa.delay_min, sa.delay_max,
+                 sa.active_hours_start, sa.active_hours_end,
+                 sa.is_online, sa.is_active, sa.last_used_at, sa.created_at,
+                 sa.assigned_member_id
+          FROM sms_accounts sa
+          WHERE sa.client_id = ${req.user.sub}
+            AND sa.assigned_member_id = ${req.user.member_id}
+          ORDER BY sa.created_at DESC
+        `
+      : await sql`
+          SELECT sa.id, sa.name, sa.phone_number, sa.gateway_url, sa.api_key,
+                 sa.daily_limit, sa.sent_today, sa.delay_min, sa.delay_max,
+                 sa.active_hours_start, sa.active_hours_end,
+                 sa.is_online, sa.is_active, sa.last_used_at, sa.created_at,
+                 sa.assigned_member_id,
+                 cm.name  AS assigned_member_name,
+                 cm.email AS assigned_member_email
+          FROM sms_accounts sa
+          LEFT JOIN client_members cm ON cm.id = sa.assigned_member_id
+          WHERE sa.client_id = ${req.user.sub}
+          ORDER BY sa.created_at DESC
+        `
+
+    // Alerta de credenciales duplicadas: varias cuentas con la MISMA api_key (+gateway)
+    // apuntan al MISMO teléfono físico → todas envían desde el mismo SIM (fuente de
+    // confusión: el SMS sale de otro número). Se marca para avisarlo en la UI.
+    // La api_key NUNCA se expone en la respuesta.
+    const byKey = new Map()
+    for (const a of rows) {
+      if (!a.api_key) continue
+      const k = `${a.gateway_url}::${a.api_key}`
+      if (!byKey.has(k)) byKey.set(k, [])
+      byKey.get(k).push(a)
     }
-    return sql`
-      SELECT sa.id, sa.name, sa.phone_number, sa.gateway_url,
-             sa.daily_limit, sa.sent_today, sa.delay_min, sa.delay_max,
-             sa.active_hours_start, sa.active_hours_end,
-             sa.is_online, sa.is_active, sa.last_used_at, sa.created_at,
-             sa.assigned_member_id,
-             cm.name  AS assigned_member_name,
-             cm.email AS assigned_member_email
-      FROM sms_accounts sa
-      LEFT JOIN client_members cm ON cm.id = sa.assigned_member_id
-      WHERE sa.client_id = ${req.user.sub}
-      ORDER BY sa.created_at DESC
-    `
+    return rows.map(a => {
+      const group = a.api_key ? byKey.get(`${a.gateway_url}::${a.api_key}`) : null
+      const shares_with = group && group.length > 1 ? group.filter(x => x.id !== a.id).map(x => x.name) : []
+      const { api_key, ...rest } = a
+      return { ...rest, shares_apikey: shares_with.length > 0, shares_with }
+    })
   })
 
   // Crear cuenta
