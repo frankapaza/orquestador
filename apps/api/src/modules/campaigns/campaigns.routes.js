@@ -162,18 +162,22 @@ export async function campaignsRoutes(fastify) {
     const subject  = body.channel === 'email' ? body.subject   : (body.subject   || body.name)
     const fromName = body.channel === 'email' ? body.from_name : (body.from_name || body.name)
 
+    // Si tiene fecha programada, nace como 'scheduled' para que el cron la arranque
+    // a su hora. Sin fecha, queda 'draft' (se envía con "Enviar ahora").
+    const status = body.scheduled_at ? 'scheduled' : 'draft'
+
     const [campaign] = await sql`
       INSERT INTO campaigns (
         client_id, name, channel, subject, from_name, reply_to, html_content, text_content,
         content_text, media_url, media_caption, list_id, strategy, scheduled_at, settings,
-        total_recipients, assistant_id
+        total_recipients, assistant_id, status
       )
       VALUES (
         ${req.user.sub}, ${body.name}, ${body.channel}, ${subject}, ${fromName},
         ${body.reply_to ?? null}, ${body.html_content ?? null}, ${body.text_content ?? null},
         ${body.content_text ?? null}, ${body.media_url || null}, ${body.media_caption ?? null},
         ${body.list_id}, ${body.strategy}, ${body.scheduled_at ?? null},
-        ${sql.json(body.settings)}, ${list.total_count}, ${body.assistant_id ?? null}
+        ${sql.json(body.settings)}, ${list.total_count}, ${body.assistant_id ?? null}, ${status}
       )
       RETURNING *
     `
