@@ -110,9 +110,12 @@ export function startCampaignWorker() {
       let accountId = null
 
       if (channel === 'whatsapp') {
-        // ── WhatsApp via Evolution API (round-robin) ─────────────────
-        const account = await pickWhatsappAccount(campaign.client_id)
-        if (!account) throw new Error('No hay cuentas WhatsApp disponibles con cuota')
+        // ── WhatsApp (Baileys/Evolution). Campaña IA → pool con el asistente vinculado.
+        const account = await pickWhatsappAccount(campaign.client_id, {
+          assistantId: campaign.assistant_id ?? null,
+          accountIds:  campaign.settings?.wa_account_ids ?? null,
+        })
+        if (!account) throw new Error('No hay cuentas WhatsApp disponibles con cuota (o ninguna con el asistente vinculado)')
         messageId = await sendWhatsapp({ campaign, contact: sendContact, account })
         accountId = account.id
 

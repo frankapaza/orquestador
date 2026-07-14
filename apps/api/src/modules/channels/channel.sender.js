@@ -3,6 +3,7 @@ import { EvolutionAdapter } from './adapters/evolution.adapter.js'
 import { AndroidSmsAdapter } from './adapters/android-sms.adapter.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
 import { fullPhone } from '../../lib/phone.js'
+import { resolveVars, buildContextFromContact } from '../assistants/assistant.vars.js'
 
 function isWithinActiveHours(account) {
   const now = new Date()
@@ -17,8 +18,9 @@ function randomDelay(min, max) {
   return Math.floor(Math.random() * (max - min) + min) * 1000
 }
 
-// Selecciona la cuenta con menor carga proporcional (sent_today / daily_limit)
-export async function pickWhatsappAccount(clientId) {
+// Selecciona la cuenta con menor carga proporcional (sent_today / daily_limit).
+// Opcional: filtra por asistente vinculado y/o por un pool de IDs (campaña IA).
+export async function pickWhatsappAccount(clientId, { assistantId = null, accountIds = null } = {}) {
   const accounts = await sql`
     SELECT * FROM whatsapp_accounts
     WHERE client_id = ${clientId}
@@ -27,6 +29,8 @@ export async function pickWhatsappAccount(clientId) {
       AND sent_today < daily_limit
       AND banned_at IS NULL
       AND COALESCE(risk_level, 'green') <> 'red'
+      ${assistantId ? sql`AND assistant_id = ${assistantId}` : sql``}
+      ${accountIds && accountIds.length ? sql`AND id IN ${sql(accountIds)}` : sql``}
     ORDER BY (sent_today::float / daily_limit) ASC
   `
   return accounts.find(isWithinActiveHours) ?? null
@@ -49,12 +53,22 @@ export async function sendWhatsapp({ campaign, contact, account }) {
   const phone = fullPhone(contact) ?? contact.metadata?.phone ?? null
   if (!phone) throw new Error('Contacto sin número de teléfono')
 
+  const ctx = buildContextFromContact(contact, phone)
+
+  // Campaña IA: el mensaje es el saludo del asistente. Manual: el content_text.
+  let bodyTpl = campaign.content_text ?? ''
+  if (campaign.assistant_id) {
+    const [asst] = await sql`SELECT greeting FROM wa_assistants WHERE id = ${campaign.assistant_id}`
+    bodyTpl = asst?.greeting ?? ''
+  }
+  const body = resolveVars(bodyTpl, ctx)
+
   const payload = {
     to:           phone,
-    body:         campaign.content_text,
+    body,
     mediaUrl:     campaign.media_url ?? undefined,
     mediaType:    campaign.settings?.media_type ?? 'image',
-    mediaCaption: campaign.media_caption ?? undefined,
+    mediaCaption: campaign.media_caption ? resolveVars(campaign.media_caption, ctx) : undefined,
   }
 
   let result
@@ -80,7 +94,10 @@ export async function sendSms({ campaign, contact, account }) {
   const phone = contact.metadata?.phone ?? fullPhone(contact) ?? contact.phone_number ?? null
   if (!phone) throw new Error('Contacto sin número de teléfono')
 
-  const result = await adapter.send({ to: phone, body: campaign.content_text })
+  const ctx = buildContextFromContact(contact, phone)
+  const body = resolveVars(campaign.content_text ?? '', ctx)
+
+  const result = await adapter.send({ to: phone, body })
 
   await sql`
     UPDATE sms_accounts
