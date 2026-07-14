@@ -499,6 +499,22 @@ class BaileysManager {
     } catch { return false }
   }
 
+  // Consulta a los servidores de WhatsApp si el número está registrado.
+  // Se usa ANTES de enviar en campañas para no escribir a números sin WhatsApp
+  // (una de las señales de baneo). Devuelve true/false.
+  // OJO anti-baneo: llamarlo espaciado (inline con los delays de envío), NUNCA
+  // como barrido masivo previo — un pico de consultas parece enumeración y
+  // puede banear el chip.
+  async isOnWhatsApp(name, phone) {
+    const s = this.sessions.get(name)
+    if (!s?.socket || s.status !== 'connected') throw new Error('WhatsApp no conectado')
+    const digits = String(phone ?? '').replace(/\D/g, '')
+    if (!digits) return false
+    const res = await s.socket.onWhatsApp(digits)
+    const hit = Array.isArray(res) ? res[0] : null
+    return !!hit?.exists
+  }
+
   async send(name, { to, body, mediaUrl, mediaType, mediaCaption }) {
     const s = this.sessions.get(name)
     if (!s?.socket) throw new Error('Sesión no activa')

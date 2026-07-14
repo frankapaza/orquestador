@@ -48,6 +48,21 @@ export async function pickSmsAccount(clientId) {
   return accounts.find(isWithinActiveHours) ?? null
 }
 
+// Valida (anti-baneo) que el número tenga WhatsApp ANTES de enviarle.
+// Solo se puede consultar por Baileys; con otros proveedores no bloqueamos.
+// Si el chequeo falla por red/transitorio, devolvemos true para no descartar
+// números válidos por un error puntual (mejor enviar que perder el mensaje).
+export async function isWhatsappNumber({ contact, account }) {
+  if (account.provider !== 'baileys') return true
+  const phone = fullPhone(contact) ?? contact.metadata?.phone ?? contact.phone_number ?? null
+  if (!phone) return false
+  try {
+    return await baileysManager.isOnWhatsApp(account.instance_name, phone)
+  } catch {
+    return true
+  }
+}
+
 export async function sendWhatsapp({ campaign, contact, account }) {
   // El número se guarda separado (phone_dial + phone). Aquí se concatena el completo.
   const phone = fullPhone(contact) ?? contact.metadata?.phone ?? null

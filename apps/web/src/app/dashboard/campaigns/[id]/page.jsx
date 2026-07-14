@@ -24,6 +24,7 @@ const JOB_COLOR = {
   sent:    'bg-jungle-green-100 text-jungle-green-700',
   failed:  'bg-red-100 text-red-700',
   bounced: 'bg-amber-100 text-amber-700',
+  invalid: 'bg-orange-100 text-orange-700',
 }
 
 export default function CampaignDetailPage() {
@@ -119,6 +120,7 @@ export default function CampaignDetailPage() {
     { value: 'sent', label: 'Enviados' },
     { value: 'pending', label: 'Pendientes' },
     { value: 'failed', label: 'Fallidos' },
+    { value: 'invalid', label: 'Sin WhatsApp' },
     { value: 'bounced', label: 'Rebotados' },
   ]
 
@@ -276,7 +278,7 @@ export default function CampaignDetailPage() {
                   <td className="px-5 py-3 text-muted-foreground">{[job.first_name, job.last_name].filter(Boolean).join(' ') || '-'}</td>
                   <td className="px-5 py-3">
                     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${JOB_COLOR[job.status] ?? 'bg-muted text-muted-foreground'}`}>
-                      {job.status}
+                      {job.status === 'invalid' ? 'Sin WhatsApp' : job.status}
                     </span>
                   </td>
                   <td className="px-5 py-3 text-xs text-muted-foreground">
