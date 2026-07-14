@@ -102,13 +102,22 @@ export async function processOutgoingFromDevice({ clientId, channel, accountId, 
 }
 
 export async function updateMessageStatus(clientId, externalId, status) {
-  const updates = { status }
-  if (status === 'delivered') updates.delivered_at = new Date()
-  if (status === 'read')      updates.read_at = new Date()
+  // Los acuses de WhatsApp llegan DESORDENADOS: un SERVER_ACK ('sent') puede llegar
+  // DESPUÉS de un DELIVERY_ACK ('delivered'). Solo AVANZAMOS el estado (sent<delivered
+  // <read), nunca lo degradamos; y las fechas se fijan una vez (COALESCE).
+  const rank = { sent: 1, delivered: 2, read: 3 }[status] ?? 0
+  const setDelivered = status === 'delivered' || status === 'read'
+  const setRead      = status === 'read'
 
   const [updated] = await sql`
     UPDATE messages
-    SET ${sql(updates, ...Object.keys(updates))}
+    SET status = CASE
+          WHEN ${rank} > (CASE status WHEN 'read' THEN 3 WHEN 'delivered' THEN 2 WHEN 'sent' THEN 1 ELSE 0 END)
+            THEN ${status}
+          ELSE status
+        END,
+        delivered_at = ${setDelivered ? sql`COALESCE(delivered_at, now())` : sql`delivered_at`},
+        read_at      = ${setRead ? sql`COALESCE(read_at, now())` : sql`read_at`}
     WHERE external_id = ${externalId} AND client_id = ${clientId}
     RETURNING id, conversation_id, status, delivered_at, read_at
   `
