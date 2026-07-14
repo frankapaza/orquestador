@@ -634,6 +634,7 @@ export default function InboxPage() {
   const [aiSummaryLoading, setAiSummaryLoading] = useState(false)
   const [aiSummaryError, setAiSummaryError]     = useState(null)
   const [aiSummaryText, setAiSummaryText]       = useState(null)
+  const [statusActionError, setStatusActionError] = useState(null)
 
   const loadConversations = useCallback(() => {
     const params = new URLSearchParams()
@@ -783,6 +784,7 @@ export default function InboxPage() {
     setSelected(conv)
     setPresence(null) // reset hasta confirmar
     setShowAiSummary(false); setAiSummaryText(null); setAiSummaryError(null) // reset resumen IA al cambiar de chat
+    setStatusActionError(null)
     const r = await api.get(`/conversations/${conv.id}`)
     setSelected(r.data)
     setMessages(r.data.messages ?? [])
@@ -855,10 +857,15 @@ export default function InboxPage() {
   }
 
   async function setConvStatus(status) {
-    await api.patch(`/conversations/${selected.id}/status`, { status })
-    if (status === 'closed' && statusFilter === 'open') { setSelected(null); setMessages([]) }
-    else setSelected(s => ({ ...s, status }))
-    loadConversations()
+    setStatusActionError(null)
+    try {
+      await api.patch(`/conversations/${selected.id}/status`, { status })
+      if (status === 'closed' && statusFilter === 'open') { setSelected(null); setMessages([]) }
+      else setSelected(s => ({ ...s, status }))
+      loadConversations()
+    } catch (err) {
+      setStatusActionError(err.response?.data?.error ?? err.message)
+    }
   }
 
   const filtered = conversations.filter(c => {
@@ -1012,7 +1019,17 @@ export default function InboxPage() {
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar name={selected.contact_name} phone={selected.contact_phone} channel={selected.channel} size="sm" />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-foreground">{selected.contact_name ?? (selected.is_group ? 'Grupo' : selected.contact_phone)}</p>
+                  <p className="flex items-center gap-2 truncate text-sm font-semibold text-foreground">
+                    {selected.contact_name ?? (selected.is_group ? 'Grupo' : selected.contact_phone)}
+                    {selected.status && (
+                      <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium',
+                        selected.status === 'closed' ? 'bg-muted text-muted-foreground'
+                        : selected.status === 'pending' ? 'bg-amber-100 text-amber-700'
+                        : 'bg-jungle-green-100 text-jungle-green-700')}>
+                        {selected.status === 'closed' ? 'Cerrada' : selected.status === 'pending' ? 'En espera' : 'Abierta'}
+                      </span>
+                    )}
+                  </p>
                   <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                     <span className="font-mono">{selected.is_group ? '👥 Grupo' : selected.contact_phone}</span>
                     {selected.account_name && <span className="flex items-center gap-1"><PhoneCall size={10} /> vía {selected.account_name}</span>}
@@ -1021,6 +1038,7 @@ export default function InboxPage() {
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
+                {statusActionError && <span className="text-xs text-red-600">{statusActionError}</span>}
                 <Button variant="outline" size="sm" onClick={openAiSummary}><Bot size={12} strokeWidth={1.75} /> Resumen IA</Button>
                 {selected.status === 'closed'
                   ? <Button variant="outline" size="sm" onClick={() => setConvStatus('open')}><RotateCcw size={12} strokeWidth={1.75} /> Reabrir</Button>
