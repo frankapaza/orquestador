@@ -1,3 +1,12 @@
+// El gateway (sms-gate.app / Android SMS Gateway) exige el número destino en
+// formato E.164 con "+" (ej. +51986095857). Sin el "+" responde "invalid phone
+// number". Normaliza cualquier entrada (con o sin "+", con espacios/guiones).
+function toE164(n) {
+  const s = String(n ?? '').trim()
+  const digits = (s.startsWith('+') ? s.slice(1) : s).replace(/\D/g, '')
+  return digits ? '+' + digits : ''
+}
+
 // Soporta dos modos:
 // - Cloud (api.sms-gate.app): Basic Auth, ruta /3rdparty/v1/
 // - Local (IP local):         Bearer token, ruta /api/v1/
@@ -44,7 +53,7 @@ export class AndroidSmsAdapter {
   async send({ to, body }) {
     return this.#request('POST', '/message', {
       message:      body,
-      phoneNumbers: [to],
+      phoneNumbers: [toE164(to)],
     })
   }
 
