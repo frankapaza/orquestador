@@ -96,8 +96,9 @@ export async function campaignsRoutes(fastify) {
     `
 
     // Variables del asistente que NO vienen como columna en el Excel.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
     let variables_faltantes = []
-    if (req.query.assistant_id) {
+    if (req.query.assistant_id && UUID_RE.test(req.query.assistant_id)) {
       const [asst] = await sql`SELECT * FROM wa_assistants WHERE id = ${req.query.assistant_id} AND client_id = ${req.user.sub}`
       if (asst) {
         const cols = new Set(parsed.columns.map(c => c.toUpperCase()))
@@ -137,7 +138,16 @@ export async function campaignsRoutes(fastify) {
 
     // Campaña IA: los números elegidos deben existir y tener ese asistente vinculado.
     if (body.assistant_id) {
-      const wanted = body.settings?.wa_account_ids ?? []
+      const [asst] = await sql`
+        SELECT id, greeting FROM wa_assistants
+        WHERE id = ${body.assistant_id} AND client_id = ${req.user.sub}
+      `
+      if (!asst) return reply.code(404).send({ error: 'Asistente no encontrado' })
+      if (!asst.greeting || !asst.greeting.trim()) {
+        return reply.code(400).send({ error: 'El asistente no tiene saludo configurado; la campaña IA no tendría mensaje de apertura' })
+      }
+
+      const wanted = [...new Set(body.settings?.wa_account_ids ?? [])]
       if (!wanted.length) return reply.code(400).send({ error: 'Selecciona al menos un número de WhatsApp para la campaña IA' })
       const linked = await sql`
         SELECT id FROM whatsapp_accounts
