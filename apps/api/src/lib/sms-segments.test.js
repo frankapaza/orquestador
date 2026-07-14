@@ -32,3 +32,12 @@ test('carácter de extensión GSM-7 cuenta doble', () => {
   assert.equal(smsSegmentInfo('{'.repeat(80)).segments, 1)
   assert.equal(smsSegmentInfo('{'.repeat(81)).segments, 2)
 })
+
+test('UCS-2 exactamente 70 chars = 1 segmento', () => {
+  // 'д' (cirílico) fuerza UCS-2; 70 code units = umbral → 1 segmento.
+  assert.equal(smsSegmentInfo('д'.repeat(70)).segments, 1)
+})
+
+test('string vacío = 1 segmento GSM-7, longitud 0', () => {
+  assert.deepEqual(smsSegmentInfo(''), { encoding: 'GSM7', length: 0, segments: 1 })
+})
