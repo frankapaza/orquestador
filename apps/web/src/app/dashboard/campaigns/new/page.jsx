@@ -13,6 +13,7 @@ import {
   Smartphone, Users, Image, ClipboardList, Loader2, Info, AlertTriangle, Send,
 } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
+import { smsSegments } from '@/lib/sms'
 
 const STRATEGIES = [
   { value: 'smtp_own',  label: 'SMTP propio (rotación de cuentas)' },
@@ -360,7 +361,17 @@ function NewCampaignForm() {
                     <textarea id="content_text" value={form.content_text} onChange={e => set('content_text', e.target.value)} rows={7}
                       className="w-full resize-none rounded-xl border border-transparent bg-muted/60 px-4 py-3 text-sm shadow-none outline-none transition-colors focus:border-ring focus:bg-background"
                       placeholder={form.channel === 'whatsapp' ? 'Escribe tu mensaje de WhatsApp...' : 'Escribe tu SMS (máx. ~160 caracteres por segmento)...'} />
-                    <p className="text-right text-xs text-muted-foreground">{form.content_text.length} caracteres</p>
+                    {form.channel === 'sms' ? (() => {
+                      const s = smsSegments(form.content_text)
+                      return (
+                        <p className={`text-right text-xs mt-1 ${s.segments > 1 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                          {s.length} caracteres · {s.segments} segmento{s.segments !== 1 ? 's' : ''} ({s.encoding === 'UCS2' ? 'Unicode 70/seg' : 'GSM 160/seg'})
+                          {s.segments > 1 && ' — supera un SMS: se enviará en varios mensajes por teléfono.'}
+                        </p>
+                      )
+                    })() : (
+                      <p className="text-right text-xs text-muted-foreground">{form.content_text.length} caracteres</p>
+                    )}
                   </div>
                   {form.channel === 'whatsapp' && (
                     <div className="grid grid-cols-1 gap-4 rounded-xl border bg-muted/30 p-4">
