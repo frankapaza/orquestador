@@ -256,6 +256,64 @@ export async function smsRoutes(fastify) {
     }
   })
 
+  // Purgar webhooks HUÉRFANOS del gateway (solo admin). Caso: dos cuentas
+  // compartían api_key (mismo teléfono en sms-gate.app); al limpiar/eliminar una,
+  // su webhook `/webhooks/sms/<accountId>` quedó registrado en el gateway y sigue
+  // disparando SMS entrantes duplicados. Este endpoint usa las credenciales de la
+  // cuenta :id (que SÍ tiene api_key) para listar los webhooks de ESE teléfono y
+  // borrar los que apunten a un accountId sin credencial (cuenta limpiada/borrada).
+  fastify.post('/sms/accounts/:id/webhook/purge-orphans', { onRequest: pre }, async (req, reply) => {
+    if (req.user.member_id) return reply.code(403).send({ error: 'Solo el administrador puede purgar webhooks' })
+
+    const [account] = await sql`
+      SELECT id, gateway_url, api_key FROM sms_accounts
+      WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+    `
+    if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
+    if (!account.api_key) return reply.code(400).send({ error: 'Esta cuenta no tiene api_key; usa una cuenta con credencial válida del mismo teléfono' })
+
+    // accountIds con credencial vigente → sus webhooks son legítimos, NO se tocan.
+    const alive = await sql`
+      SELECT id FROM sms_accounts
+      WHERE client_id = ${req.user.sub} AND api_key IS NOT NULL
+    `
+    const aliveIds = new Set(alive.map(a => a.id))
+
+    // Extrae el accountId de una URL `.../webhooks/sms/<accountId>`.
+    const idFromUrl = (url) => {
+      const m = /\/webhooks\/sms\/([0-9a-fA-F-]{36})/.exec(url || '')
+      return m ? m[1] : null
+    }
+
+    const adapter = new AndroidSmsAdapter(account)
+    let webhooks
+    try {
+      webhooks = await adapter.listWebhooks()
+    } catch (err) {
+      return reply.code(502).send({ ok: false, error: err.message, status: err.status ?? null })
+    }
+    if (!Array.isArray(webhooks)) webhooks = []
+
+    const purged = []
+    for (const w of webhooks) {
+      const wAccountId = idFromUrl(w.url)
+      // Huérfano: apunta a un `/webhooks/sms/<uuid>` NUESTRO cuyo accountId ya no
+      // tiene credencial (cuenta limpiada o eliminada). Los que no matchean el
+      // patrón (webhooks ajenos) se dejan intactos.
+      if (wAccountId && !aliveIds.has(wAccountId)) {
+        try {
+          await adapter.deleteWebhookById(w.id)
+          purged.push({ id: w.id, url: w.url, event: w.event, accountId: wAccountId })
+        } catch (err) {
+          req.log.warn({ err }, `[SMS] No se pudo borrar webhook huérfano ${w.id}`)
+        }
+      }
+    }
+
+    const remaining = await adapter.listWebhooks().catch(() => [])
+    return { ok: true, purged, purged_count: purged.length, remaining }
+  })
+
   // Enviar SMS puntual
   fastify.post('/sms/send', { onRequest: pre }, async (req, reply) => {
     const body = z.object({

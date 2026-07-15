@@ -96,4 +96,10 @@ export class AndroidSmsAdapter {
       await this.#request('DELETE', `/webhooks/${w.id}`).catch(() => {})
     }
   }
+
+  // Borra un webhook por su id en el gateway (lanza si falla, a diferencia de
+  // deleteWebhookByUrl que es best-effort).
+  async deleteWebhookById(id) {
+    return this.#request('DELETE', `/webhooks/${id}`)
+  }
 }
