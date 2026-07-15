@@ -179,6 +179,15 @@ export async function incomingWebhooksRoutes(fastify) {
     `
     if (!account) return reply.code(404).send({ error: 'Cuenta no encontrada' })
 
+    // Cuenta con credencial LIMPIADA (api_key vacía) = desactivada a propósito. Si
+    // aún llega un webhook es porque quedó una registración huérfana en el gateway
+    // (p. ej. cuando dos cuentas compartían la MISMA api_key/teléfono). Ignorar sin
+    // registrar, para no duplicar la conversación en la cuenta equivocada.
+    if (!account.api_key) {
+      req.log.warn(`[SMS] Webhook entrante ignorado: cuenta ${accountId} sin api_key (credencial limpiada)`)
+      return reply.code(200).send({ ok: true, ignored: 'cuenta sin credencial' })
+    }
+
     // Mensaje recibido: { event: "sms:received", payload: { message, phoneNumber, receivedAt } }
     if (event?.event === 'sms:received' || event?.type === 'received') {
       const payload = event?.payload ?? event

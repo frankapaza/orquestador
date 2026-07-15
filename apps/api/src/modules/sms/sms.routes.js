@@ -142,6 +142,18 @@ export async function smsRoutes(fastify) {
     if (body.api_key === '') body.api_key = null
     if (Object.keys(body).length === 0) return reply.code(400).send({ error: 'Nada que actualizar' })
 
+    // Si se está LIMPIANDO la api_key, primero borrar el webhook del gateway usando la
+    // credencial VIEJA — después de nulificarla ya no podríamos autenticarnos para
+    // eliminarlo, y quedaría una registración huérfana disparando SMS entrantes
+    // duplicados (caso: dos cuentas compartían la misma api_key/teléfono físico).
+    if (body.api_key === null) {
+      const [old] = await sql`
+        SELECT id, gateway_url, api_key FROM sms_accounts
+        WHERE id = ${req.params.id} AND client_id = ${req.user.sub}
+      `
+      if (old?.api_key) await removeIncomingWebhook(fastify, old)
+    }
+
     const [account] = await sql`
       UPDATE sms_accounts
       SET ${sql(body, ...Object.keys(body))}
