@@ -37,6 +37,14 @@ const CHANNEL_TINT = {
 
 const fieldClass = 'h-[52px] rounded-xl border-transparent bg-muted/60 text-base shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0'
 
+// Número de WhatsApp para mostrar en el SMS anti-baneo. Quita el prefijo país 51
+// de Perú cuando queda un móvil local de 9 dígitos (928502009), que es como la
+// gente lo reconoce; en cualquier otro caso deja el número tal cual.
+function waDisplayNumber(digits) {
+  const d = String(digits || '').replace(/\D/g, '')
+  return /^51\d{9}$/.test(d) ? d.slice(2) : d
+}
+
 function NewCampaignForm() {
   const router       = useRouter()
   const searchParams = useSearchParams()
@@ -62,9 +70,11 @@ function NewCampaignForm() {
   const [recipientMode, setRecipientMode] = useState('list') // 'list' | 'upload' (para WA/SMS manual)
   const [templateLoading, setTemplateLoading] = useState(false)
 
-  // SMS de seguimiento con link wa.me (viene de la campaña de origen vía ?channel=sms&list_id=&wame=)
+  // SMS de seguimiento anti-baneo (viene de la campaña de origen vía ?channel=sms&list_id=&wame=).
+  // NO se usa link wa.me: los operadores bloquean los SMS con URLs (http/https). En su lugar
+  // se inserta el número de WhatsApp del asistente en texto plano ({{whatsapp}}), para que el
+  // cliente ESCRIBA él mismo (conversación iniciada por el cliente = anti-baneo).
   const [wameNumber, setWameNumber] = useState('')
-  const [wamePrefill, setWamePrefill] = useState('Hola, quiero continuar con mi atención')
 
   const [form, setForm] = useState({
     name: '', channel: 'email',
@@ -118,7 +128,12 @@ function NewCampaignForm() {
     if (!listIdParam && !channelParam) return
     if (channelParam) pickChannel(channelParam)
     if (listIdParam) set('list_id', listIdParam)
-    setWameNumber(searchParams.get('wame') || '')
+    const waParam = searchParams.get('wame') || ''
+    setWameNumber(waParam)
+    // Mensaje anti-baneo por defecto: pide al cliente que ESCRIBA al WhatsApp (sin link).
+    if (waParam) {
+      set('content_text', `Hola {{cliente}}, no pudimos contactarte por WhatsApp. Escríbenos al WhatsApp ${waDisplayNumber(waParam)} y continuamos por ahí.`)
+    }
   }, [])
 
   function set(field, value) { setForm(f => ({ ...f, [field]: value })) }
@@ -239,8 +254,11 @@ function NewCampaignForm() {
         } else {
           let contentText = form.content_text
           if (wameNumber) {
-            const url = `https://wa.me/${wameNumber}?text=${encodeURIComponent(wamePrefill)}`
-            contentText = contentText.replaceAll('{{link}}', url)
+            // Sin URL (los operadores bloquean http/https). Insertamos el número de
+            // WhatsApp en texto plano. {{whatsapp}} es el token nuevo; {{link}} se
+            // mantiene como alias para no romper mensajes escritos con el ejemplo viejo.
+            const waNum = waDisplayNumber(wameNumber)
+            contentText = contentText.replaceAll('{{whatsapp}}', waNum).replaceAll('{{link}}', waNum)
           }
           payload.content_text = contentText
           if (form.channel === 'whatsapp' && form.media_url) {
@@ -587,12 +605,10 @@ function NewCampaignForm() {
                     )}
                   </div>
                   {wameNumber && (
-                    <div className="space-y-1.5">
-                      <Label htmlFor="wame_prefill">Texto prellenado del WhatsApp (lo que verá escrito el cliente al abrir el chat)</Label>
-                      <Input id="wame_prefill" value={wamePrefill} onChange={e => setWamePrefill(e.target.value)} className={fieldClass} />
-                      <p className="text-xs text-muted-foreground">
-                        Usa <code>{'{{link}}'}</code> en tu mensaje para insertar el enlace. Ej: "Hola {'{{nombre}}'}, escríbenos aquí: {'{{link}}'}"
-                      </p>
+                    <div className="space-y-1 rounded-xl border bg-muted/30 p-4 text-xs text-muted-foreground">
+                      <p>Usa <code>{'{{whatsapp}}'}</code> en tu mensaje para insertar el WhatsApp del asistente (<strong className="text-foreground">{waDisplayNumber(wameNumber)}</strong>).</p>
+                      <p>Ej: "Hola {'{{cliente}}'}, escríbenos al WhatsApp {'{{whatsapp}}'}"</p>
+                      <p className="text-amber-600">⚠️ No pongas enlaces (http/https): los operadores bloquean los SMS con links. Por eso pedimos que el cliente escriba al número — además así la conversación la inicia el cliente (anti-baneo).</p>
                     </div>
                   )}
                   {form.channel === 'whatsapp' && (

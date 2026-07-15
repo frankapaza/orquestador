@@ -178,7 +178,7 @@ export default function CampaignDetailPage() {
                     setActionLoading(false)
                   }
                 }}>
-                  Generar SMS con link wa.me
+                  Generar SMS de seguimiento
                 </Button>
               )}
             </div>
