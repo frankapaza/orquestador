@@ -3,7 +3,7 @@ import Link from 'next/link'
 import {
   Box, LayoutDashboard, MessageCircle, Megaphone, Smartphone, User, Users,
   Globe, FileText, Puzzle, PhoneCall, Phone, Webhook, Settings, BarChart2,
-  BookOpen, Mail, Shield,
+  BookOpen, Mail, Shield, Bot, Flame,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -26,6 +26,8 @@ const ICON_MAP = {
   '📖': BookOpen,
   '🛡️': Shield,
   '📧': Mail,
+  '🤖': Bot,
+  '🔥': Flame,
 }
 
 function NavLink({ item, active, collapsed, onNavigate }) {
