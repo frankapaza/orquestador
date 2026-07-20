@@ -26,7 +26,7 @@
     "fastify": "^4.28.1",
     "fastify-plugin": "^5.1.0",
     "https-proxy-agent": "^9.1.0",
-    "imapflow": "^1.0.164",
+    "imapflow": "^1.4.7",
     "ioredis": "^5.4.1",
     "mailparser": "^3.7.1",
     "nanoid": "^5.0.7",
