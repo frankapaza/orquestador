@@ -12,7 +12,17 @@ import { Input }        from '@/components/ui/input'
 import { CountryPhoneInput, Flag, DEFAULT_COUNTRY, resolveCountry, nationalNumber } from '@/components/ui/phone-input'
 import { SelectMenu } from '@/components/ui/select-menu'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PhoneCall, QrCode, RefreshCw, RotateCcw, Trash2, Save, Zap, Link2, User, Plus, CheckCircle, Loader2, Smartphone, Wifi, X, Clock, Gauge, ChevronDown } from '../../../components/ui/icons'
+import { PhoneCall, QrCode, RefreshCw, RotateCcw, Trash2, Save, Zap, Link2, User, Plus, CheckCircle, Loader2, Smartphone, Wifi, X, Clock, Gauge, ChevronDown, Megaphone, MessageCircle } from '../../../components/ui/icons'
+
+// Tipo de número: Individual (conversaciones 1 a 1) o Campaña (envíos masivos)
+const ROLE_OPTIONS = [
+  { value: 'campaign', label: 'Campaña',    Icon: Megaphone,     desc: 'Número dedicado a envíos masivos de campañas.' },
+  { value: 'advisor',  label: 'Individual',  Icon: MessageCircle, desc: 'Conversaciones 1 a 1 en el Inbox. Puede asignarse a un asesor.' },
+]
+const ROLE_META = {
+  campaign: { label: 'Campaña',   Icon: Megaphone,     badge: 'bg-violet-100 text-violet-700', tone: 'text-violet-600', desc: 'Números para envíos masivos' },
+  advisor:  { label: 'Individual', Icon: MessageCircle, badge: 'bg-blue-100 text-blue-700',     tone: 'text-blue-600',   desc: 'Números para conversaciones 1 a 1' },
+}
 
 const EMPTY = {
   provider: 'baileys',
@@ -351,6 +361,26 @@ export default function WhatsappAccountsPage() {
             )}
 
             <form onSubmit={submit} className="space-y-5 overflow-y-auto p-6">
+              {/* Tipo de número: Individual o Campaña */}
+              <div>
+                <label className={`${labelCls} mb-2`}>
+                  ¿Para qué usarás este número? <HelpTooltip text="Individual: conversaciones 1 a 1 en el Inbox (asignable a un asesor). Campaña: número dedicado a envíos masivos." />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {ROLE_OPTIONS.map(r => (
+                    <button key={r.value} type="button"
+                      onClick={() => setForm(f => ({ ...f, role: r.value, assigned_member_id: r.value === 'campaign' ? null : f.assigned_member_id }))}
+                      className={`rounded-xl border-2 p-3 text-left transition-all ${
+                        form.role === r.value ? 'border-jungle-green-500 bg-jungle-green-50' : 'border-border bg-card hover:border-jungle-green-200'
+                      }`}>
+                      <span className={`mb-1 block ${form.role === r.value ? 'text-jungle-green-600' : 'text-muted-foreground'}`}><r.Icon size={20} strokeWidth={1.75} /></span>
+                      <p className="text-sm font-semibold text-foreground">{r.label}</p>
+                      <p className="mt-0.5 text-xs leading-tight text-muted-foreground">{r.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Motor de conexión */}
               <div>
                 <label className={`${labelCls} mb-2`}>
@@ -442,7 +472,7 @@ export default function WhatsappAccountsPage() {
                     <Input {...field('delay_max')} type="number" min="0" className={`mt-1 ${inputCls}`} />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="flex items-center text-xs text-muted-foreground">Hora inicio <HelpTooltip text="Solo enviará mensajes a partir de esta hora." /></label>
                     <Input {...field('active_hours_start')} type="time" className={`mt-1 ${inputCls}`} />
@@ -450,13 +480,6 @@ export default function WhatsappAccountsPage() {
                   <div>
                     <label className="flex items-center text-xs text-muted-foreground">Hora fin <HelpTooltip text="Dejará de enviar mensajes pasada esta hora." /></label>
                     <Input {...field('active_hours_end')} type="time" className={`mt-1 ${inputCls}`} />
-                  </div>
-                  <div>
-                    <label className="flex items-center text-xs text-muted-foreground">Tipo de cuenta <HelpTooltip text="'Asesor': número personal. 'Campaña': número dedicado a envíos masivos." /></label>
-                    <select {...field('role')} className={selectCls}>
-                      <option value="campaign">Campaña</option>
-                      <option value="advisor">Asesor</option>
-                    </select>
                   </div>
                 </div>
               </div>
@@ -600,9 +623,22 @@ export default function WhatsappAccountsPage() {
           />
         </SectionCard>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-          {accounts.map(acc => (
-            <div key={acc.id} className={`flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all hover:shadow-md ${acc.is_connected ? 'border-jungle-green-200' : 'border-border'}`}>
+        <div className="space-y-8">
+          {['campaign', 'advisor'].map(role => {
+            const list = accounts.filter(a => (a.role ?? 'campaign') === role)
+            if (!list.length) return null
+            const gm = ROLE_META[role]
+            return (
+              <div key={role} className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <gm.Icon size={18} strokeWidth={1.75} className={gm.tone} />
+                  <h2 className="text-base font-semibold text-foreground">{gm.label}</h2>
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{list.length}</span>
+                  <span className="hidden text-xs text-muted-foreground sm:inline">· {gm.desc}</span>
+                </div>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                  {list.map(acc => (
+                    <div key={acc.id} className={`flex flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-all hover:shadow-md ${acc.is_connected ? 'border-jungle-green-200' : 'border-border'}`}>
               {/* Cabecera */}
               <div className="flex items-start justify-between gap-2 p-5 pb-4">
                 <div className="flex min-w-0 items-center gap-3">
@@ -614,9 +650,11 @@ export default function WhatsappAccountsPage() {
                     <p className="truncate font-mono text-xs text-muted-foreground">{acc.instance_name}</p>
                   </div>
                 </div>
-                <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${acc.role === 'advisor' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'}`}>
-                  {acc.role === 'advisor' ? <><User size={10} strokeWidth={2} /> Asesor</> : 'Campaña'}
-                </span>
+                {(() => { const rm = ROLE_META[acc.role] ?? ROLE_META.campaign; return (
+                  <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${rm.badge}`}>
+                    <rm.Icon size={10} strokeWidth={2} /> {rm.label}
+                  </span>
+                )})()}
               </div>
 
               {/* Número de teléfono (destacado) + estado */}
@@ -700,8 +738,12 @@ export default function WhatsappAccountsPage() {
                   )}
                 </div>
               </div>
-            </div>
-          ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
