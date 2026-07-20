@@ -7,12 +7,23 @@ import { SectionCard } from '@/components/ui/section-card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Zap, Plus, Pencil, Trash2, Save, X, Loader2, CheckCircle } from '../../../components/ui/icons'
+import { Zap, Plus, Pencil, Trash2, Save, X, Loader2, CheckCircle, Megaphone, MessageCircle } from '../../../components/ui/icons'
 
 const DAYS = [['mon','L'],['tue','M'],['wed','X'],['thu','J'],['fri','V'],['sat','S'],['sun','D']]
 
+// Tipo del asistente: Campaña (envíos masivos) o Individual (1 a 1). Debe coincidir
+// con el tipo de los números que se le asocian (whatsapp_accounts.role).
+const ROLE_OPTIONS = [
+  { value: 'campaign', label: 'Campaña',    Icon: Megaphone,     desc: 'Para campañas masivas. Solo usa números de tipo Campaña.' },
+  { value: 'advisor',  label: 'Individual', Icon: MessageCircle, desc: 'Para conversaciones 1 a 1. Solo usa números Individuales.' },
+]
+const ROLE_META = {
+  campaign: { label: 'Campaña',    Icon: Megaphone,     badge: 'bg-violet-100 text-violet-700' },
+  advisor:  { label: 'Individual', Icon: MessageCircle, badge: 'bg-blue-100 text-blue-700' },
+}
+
 const EMPTY = {
-  name: '', greeting: '', system_prompt: '',
+  name: '', role: 'campaign', greeting: '', system_prompt: '',
   active_hours_start: '09:00', active_hours_end: '18:00',
   timezone: 'America/Lima', active_days: 'mon,tue,wed,thu,fri',
   handoff_number: '', handoff_triggers: 'asesor,humano,persona,operador,ejecutivo',
@@ -52,11 +63,20 @@ export default function AssistantsPage() {
     setField('active_days', (cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d]).join(','))
   }
   function toggleAcc(id) { setAccIds(a => a.includes(id) ? a.filter(x => x !== id) : [...a, id]) }
+  // Al cambiar el tipo, descarta los números seleccionados que ya no coinciden.
+  function setRole(role) {
+    const valid = new Set(accounts.filter(w => (w.role ?? 'campaign') === role).map(w => w.id))
+    setAccIds(a => a.filter(id => valid.has(id)))
+    setField('role', role)
+  }
+
+  // Números disponibles para el tipo del asistente actual.
+  const roleAccounts = accounts.filter(w => (w.role ?? 'campaign') === (form.role ?? 'campaign'))
 
   function openNew() { setForm(EMPTY); setAccIds([]); setEditingId(null); setError(null); setShowForm(true) }
   function openEdit(a) {
     setForm({
-      name: a.name ?? '', greeting: a.greeting ?? '', system_prompt: a.system_prompt ?? '',
+      name: a.name ?? '', role: a.role ?? 'campaign', greeting: a.greeting ?? '', system_prompt: a.system_prompt ?? '',
       active_hours_start: a.active_hours_start?.slice(0,5) ?? '09:00',
       active_hours_end:   a.active_hours_end?.slice(0,5)   ?? '18:00',
       timezone: a.timezone ?? 'America/Lima', active_days: a.active_days ?? 'mon,tue,wed,thu,fri',
@@ -65,7 +85,11 @@ export default function AssistantsPage() {
       inactivity_close_hours: a.inactivity_close_hours ?? 24,
       ai_model: a.ai_model ?? '', is_active: a.is_active !== false,
     })
-    setAccIds(a.account_ids ?? [])
+    // Solo conserva los números que coinciden con el tipo del asistente (limpia
+    // vínculos heredados de antes de que existieran los tipos).
+    const arole = a.role ?? 'campaign'
+    const validIds = new Set(accounts.filter(w => (w.role ?? 'campaign') === arole).map(w => w.id))
+    setAccIds((a.account_ids ?? []).filter(id => validIds.has(id)))
     setEditingId(a.id); setError(null); setShowForm(true)
   }
 
@@ -74,7 +98,7 @@ export default function AssistantsPage() {
     setSaving(true); setError(null)
     try {
       const payload = {
-        name: form.name, greeting: form.greeting || null, system_prompt: form.system_prompt,
+        name: form.name, role: form.role || 'campaign', greeting: form.greeting || null, system_prompt: form.system_prompt,
         active_hours_start: form.active_hours_start, active_hours_end: form.active_hours_end,
         timezone: form.timezone, active_days: form.active_days,
         handoff_number: form.handoff_number || null, handoff_triggers: form.handoff_triggers || null,
@@ -124,7 +148,14 @@ export default function AssistantsPage() {
               <div key={a.id} className="flex flex-col rounded-2xl border bg-card p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">{a.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="truncate text-sm font-semibold text-foreground">{a.name}</p>
+                      {(() => { const rm = ROLE_META[a.role ?? 'campaign']; return (
+                        <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${rm.badge}`}>
+                          <rm.Icon size={11} strokeWidth={2} /> {rm.label}
+                        </span>
+                      )})()}
+                    </div>
                     <p className="mt-0.5 text-xs text-muted-foreground">
                       {a.active_hours_start?.slice(0,5)}–{a.active_hours_end?.slice(0,5)} · {(a.active_days ?? '').split(',').length} días
                     </p>
@@ -167,6 +198,22 @@ export default function AssistantsPage() {
               </div>
 
               <div>
+                <span className={label}>Tipo de asistente</span>
+                <div className="mt-1 grid grid-cols-2 gap-2">
+                  {ROLE_OPTIONS.map(r => (
+                    <button key={r.value} type="button" onClick={() => setRole(r.value)}
+                      className={`rounded-xl border-2 p-3 text-left transition-all ${
+                        (form.role ?? 'campaign') === r.value ? 'border-jungle-green-500 bg-jungle-green-50' : 'border-border bg-card hover:border-jungle-green-200'
+                      }`}>
+                      <span className={`mb-1 block ${(form.role ?? 'campaign') === r.value ? 'text-jungle-green-600' : 'text-muted-foreground'}`}><r.Icon size={20} strokeWidth={1.75} /></span>
+                      <p className="text-sm font-semibold text-foreground">{r.label}</p>
+                      <p className="mt-0.5 text-xs leading-tight text-muted-foreground">{r.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
                 <span className={label}>Saludo inicial (opcional)</span>
                 <textarea className={`mt-1 ${input} min-h-[64px]`} value={form.greeting} onChange={e => setField('greeting', e.target.value)}
                   placeholder="Buenos días, le saluda el asistente de {{ENTIDAD}}. ¿Hablo con {{NOMBRE_CLIENTE}}?" />
@@ -183,10 +230,13 @@ export default function AssistantsPage() {
 
               <div>
                 <span className={label}>Números que usan este asistente</span>
-                <div className="mt-1 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                  {accounts.length === 0
-                    ? <p className="text-xs text-muted-foreground">No hay números WhatsApp. Agrégalos en Cuentas WhatsApp.</p>
-                    : accounts.map(w => (
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Solo se muestran números de tipo <b>{ROLE_META[form.role ?? 'campaign'].label}</b> (según el tipo del asistente).
+                </p>
+                <div className="mt-1.5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                  {roleAccounts.length === 0
+                    ? <p className="text-xs text-muted-foreground">No hay números de tipo {ROLE_META[form.role ?? 'campaign'].label}. Regístralos en Cuentas WhatsApp con ese tipo.</p>
+                    : roleAccounts.map(w => (
                       <label key={w.id} className="flex cursor-pointer items-center gap-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
                         <input type="checkbox" className="h-4 w-4 accent-jungle-green-600" checked={accIds.includes(w.id)} onChange={() => toggleAcc(w.id)} />
                         <span className="truncate">{w.name} <span className="text-xs text-muted-foreground">{w.phone_number ?? ''}</span></span>

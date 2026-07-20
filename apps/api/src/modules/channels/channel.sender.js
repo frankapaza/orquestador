@@ -27,8 +27,10 @@ function randomDelay(min, max) {
 }
 
 // Selecciona la cuenta con menor carga proporcional (sent_today / daily_limit).
-// Opcional: filtra por asistente vinculado y/o por un pool de IDs (campaña IA).
-export async function pickWhatsappAccount(clientId, { assistantId = null, accountIds = null } = {}) {
+// Opcional: filtra por asistente vinculado, por un pool de IDs (campaña IA) y/o
+// por tipo de número (role: 'campaign' | 'advisor'). Las campañas normales solo
+// deben usar números de tipo Campaña.
+export async function pickWhatsappAccount(clientId, { assistantId = null, accountIds = null, role = null } = {}) {
   const accounts = await sql`
     SELECT * FROM whatsapp_accounts
     WHERE client_id = ${clientId}
@@ -37,6 +39,7 @@ export async function pickWhatsappAccount(clientId, { assistantId = null, accoun
       AND sent_today < daily_limit
       AND banned_at IS NULL
       AND COALESCE(risk_level, 'green') <> 'red'
+      ${role ? sql`AND COALESCE(role, 'campaign') = ${role}` : sql``}
       ${assistantId ? sql`AND assistant_id = ${assistantId}` : sql``}
       ${accountIds && accountIds.length ? sql`AND id IN ${sql(accountIds)}` : sql``}
     ORDER BY (sent_today::float / daily_limit) ASC

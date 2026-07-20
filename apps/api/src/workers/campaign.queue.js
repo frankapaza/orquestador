@@ -114,8 +114,11 @@ export function startCampaignWorker() {
         const account = await pickWhatsappAccount(campaign.client_id, {
           assistantId: campaign.assistant_id ?? null,
           accountIds:  campaign.settings?.wa_account_ids ?? null,
+          // Campaña normal (sin asistente): solo números de tipo Campaña. Con asistente
+          // el pool ya viene restringido a sus números (todos del mismo tipo).
+          role: campaign.assistant_id ? null : 'campaign',
         })
-        if (!account) throw new Error('No hay cuentas WhatsApp disponibles con cuota (o ninguna con el asistente vinculado)')
+        if (!account) throw new Error('No hay cuentas WhatsApp de tipo Campaña disponibles con cuota (revisa horario, conexión y límite diario)')
 
         // Anti-baneo: validar que el número tenga WhatsApp ANTES de escribir, y
         // obtener el JID exacto (mejor entrega). Solo marcamos 'invalid' si se pudo

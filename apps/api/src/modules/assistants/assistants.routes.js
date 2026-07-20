@@ -4,6 +4,7 @@ import { buildAssistantTemplate } from './assistant.template.js'
 
 const upsertSchema = z.object({
   name:                z.string().min(1),
+  role:                z.enum(['campaign', 'advisor']).optional(),
   greeting:            z.string().optional().nullable(),
   system_prompt:       z.string().min(1),
   ai_provider:         z.string().optional().nullable(),
@@ -21,7 +22,7 @@ const upsertSchema = z.object({
 })
 
 const COLS = [
-  'name', 'greeting', 'system_prompt', 'ai_provider', 'ai_model',
+  'name', 'role', 'greeting', 'system_prompt', 'ai_provider', 'ai_model',
   'active_hours_start', 'active_hours_end', 'timezone', 'active_days',
   'handoff_number', 'handoff_triggers', 'handoff_timeout_min', 'history_limit',
   'inactivity_close_hours', 'is_active',
@@ -41,7 +42,7 @@ export async function assistantsRoutes(fastify) {
       SELECT * FROM wa_assistants WHERE client_id = ${req.user.sub} ORDER BY created_at DESC
     `
     const accounts = await sql`
-      SELECT id, name, phone_number, assistant_id, is_connected
+      SELECT id, name, phone_number, assistant_id, is_connected, role
       FROM whatsapp_accounts
       WHERE client_id = ${req.user.sub} AND provider = 'baileys'
       ORDER BY created_at DESC
@@ -59,6 +60,7 @@ export async function assistantsRoutes(fastify) {
     if (!adminOnly(req, reply)) return
     const body = upsertSchema.parse(req.body)
     const vals = Object.fromEntries(COLS.map(c => [c, body[c] ?? null]))
+    vals.role = vals.role ?? 'campaign' // no dejar NULL: rompería el filtro por tipo
     const [row] = await sql`
       INSERT INTO wa_assistants ${sql({ client_id: req.user.sub, ...vals }, 'client_id', ...COLS)}
       RETURNING *
@@ -95,8 +97,22 @@ export async function assistantsRoutes(fastify) {
   fastify.put('/whatsapp/assistants/:id/accounts', { onRequest: pre }, async (req, reply) => {
     if (!adminOnly(req, reply)) return
     const { account_ids } = z.object({ account_ids: z.array(z.string().uuid()) }).parse(req.body)
-    const [asst] = await sql`SELECT id FROM wa_assistants WHERE id = ${req.params.id} AND client_id = ${req.user.sub}`
+    const [asst] = await sql`SELECT id, role FROM wa_assistants WHERE id = ${req.params.id} AND client_id = ${req.user.sub}`
     if (!asst) return reply.code(404).send({ error: 'Asistente no encontrado' })
+
+    // Un asistente solo puede usar números de su MISMO tipo (Campaña/Individual).
+    if (account_ids.length) {
+      const asstRole = asst.role ?? 'campaign'
+      const bad = await sql`
+        SELECT id FROM whatsapp_accounts
+        WHERE client_id = ${req.user.sub} AND id IN ${sql(account_ids)}
+          AND COALESCE(role, 'campaign') <> ${asstRole}
+      `
+      if (bad.length) {
+        const tipo = asstRole === 'campaign' ? 'Campaña' : 'Individual'
+        return reply.code(400).send({ error: `Solo puedes asociar números de tipo ${tipo} a este asistente.` })
+      }
+    }
 
     await sql`UPDATE whatsapp_accounts SET assistant_id = NULL
               WHERE client_id = ${req.user.sub} AND assistant_id = ${req.params.id}`

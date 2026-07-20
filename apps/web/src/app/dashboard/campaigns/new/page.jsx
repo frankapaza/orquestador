@@ -478,7 +478,7 @@ function NewCampaignForm() {
                   {!isEmail && !isAI && (
                     <div className="col-span-2 flex items-start gap-2.5 rounded-xl border border-jungle-green-100 bg-jungle-green-50 px-4 py-3 text-sm text-jungle-green-800">
                       <Info size={18} strokeWidth={1.75} className="mt-0.5 shrink-0 text-jungle-green-600" />
-                      <span>El envío rota automáticamente entre tus {form.channel === 'whatsapp' ? 'números de WhatsApp conectados' : 'gateways SMS online'}, respetando sus límites diarios y horarios.</span>
+                      <span>El envío rota automáticamente entre tus {form.channel === 'whatsapp' ? 'números de WhatsApp de tipo Campaña conectados' : 'gateways SMS online'}, respetando sus límites diarios y horarios.</span>
                     </div>
                   )}
                 </div>
