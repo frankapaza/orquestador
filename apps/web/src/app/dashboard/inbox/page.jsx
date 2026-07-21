@@ -891,6 +891,22 @@ export default function InboxPage() {
   // el administrador los ve todos).
   const activeAccount = accounts.find(a => a.id === accountFilter) ?? null
 
+  // Tabs de canal y selector de número se sincronizan para no dejar combinaciones
+  // imposibles (p.ej. gateway SMS + tab WhatsApp = 0 chats siempre).
+  const accountOptions = accounts.filter(a => !channelFilter || a.channel === channelFilter)
+
+  function pickAccount(id) {
+    setAccountFilter(id)
+    const acc = accounts.find(a => a.id === id)
+    if (acc) setChannelFilter(acc.channel) // el número define el canal
+  }
+
+  function pickChannel(key) {
+    setChannelFilter(key)
+    // Si el número activo no es de ese canal, se vuelve a "Todas las vías".
+    if (key && activeAccount && activeAccount.channel !== key) setAccountFilter('')
+  }
+
   return (
     <div className="-m-6 flex overflow-hidden" style={{ height: 'calc(100vh - 49px)' }}>
 
@@ -911,13 +927,13 @@ export default function InboxPage() {
         <div className="px-4 pb-3">
           <SelectMenu
             value={accountFilter}
-            onChange={setAccountFilter}
+            onChange={pickAccount}
             className="h-10"
             leadingIcon={<PhoneCall size={15} className="shrink-0 text-muted-foreground" />}
             placeholder="Todas las vías"
             options={[
-              { value: '', label: 'Todas las vías', icon: <PhoneCall size={14} className="shrink-0 text-muted-foreground" /> },
-              ...accounts.map(a => ({
+              { value: '', label: channelFilter ? `Todas las vías de ${CHANNEL_LABEL[channelFilter]}` : 'Todas las vías', icon: <PhoneCall size={14} className="shrink-0 text-muted-foreground" /> },
+              ...accountOptions.map(a => ({
                 value: a.id,
                 label: `${a.name} · ${a.phone_number ?? a.instance_name ?? '—'}`,
                 icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', a.channel === 'sms' ? 'bg-violet-500' : 'bg-green-500')} />,
@@ -928,6 +944,8 @@ export default function InboxPage() {
             {activeAccount ? (
               <>Ves solo los chats de este número y escribes desde{' '}
                 <span className="font-mono font-medium text-foreground">{activeAccount.phone_number ?? activeAccount.instance_name ?? '—'}</span>.</>
+            ) : channelFilter ? (
+              <>Ves todos tus chats de {CHANNEL_LABEL[channelFilter]}. Cada uno responde desde su propio número.</>
             ) : (
               <>Ves todos los chats. Cada uno responde desde su propio número.</>
             )}
@@ -957,7 +975,7 @@ export default function InboxPage() {
           <div className="flex items-center gap-2">
             <div className="flex flex-1 gap-0.5 rounded-lg bg-muted p-0.5">
               {CHANNEL_FILTERS.map(({ key, label, Icon }) => (
-                <button key={key} onClick={() => setChannelFilter(key)}
+                <button key={key} onClick={() => pickChannel(key)}
                   className={cn('flex flex-1 items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors',
                     channelFilter === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
                   {Icon && <Icon size={12} strokeWidth={1.75} />}{label}
