@@ -107,12 +107,13 @@ function ChannelBadge({ channel, className }) {
 }
 
 // ── Modal nuevo mensaje ──────────────────────────────────────────────────────
-function NewMessageModal({ onClose, onSent, initialChannel, initialPhone }) {
+function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initialAccountId }) {
   const initCountry = initialPhone ? (resolveCountry({ phone: initialPhone }) ?? DEFAULT_COUNTRY) : DEFAULT_COUNTRY
   const [channel, setChannel]         = useState(initialChannel ?? 'whatsapp')
   const [waAccounts, setWaAccounts]   = useState([])
   const [smsAccounts, setSmsAccounts] = useState([])
-  const [accountId, setAccountId]     = useState('')
+  // Hereda la "vía" filtrada en el Inbox; si no hay, cae al primero disponible.
+  const [accountId, setAccountId]     = useState(initialAccountId ?? '')
   const [mode, setMode]               = useState(initialPhone ? 'manual' : 'search') // 'search' | 'manual'
   const [query, setQuery]             = useState('')
   const [results, setResults]         = useState([])
@@ -126,21 +127,19 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone }) {
 
   useEffect(() => {
     api.get('/whatsapp/accounts').then(r => {
-      const c = r.data.filter(a => a.is_connected)
-      setWaAccounts(c)
-      if (c.length && channel === 'whatsapp') setAccountId(c[0].id)
+      setWaAccounts(r.data.filter(a => a.is_connected))
     }).catch(() => {})
     api.get('/sms/accounts').then(r => {
-      const c = r.data.filter(a => a.is_online)
-      setSmsAccounts(c)
-      if (c.length && channel === 'sms') setAccountId(c[0].id)
+      setSmsAccounts(r.data.filter(a => a.is_online))
     }).catch(() => {})
   }, [])
 
+  // Mantiene la cuenta elegida mientras siga siendo válida para el canal actual
+  // (así no se pierde la vía heredada del filtro); si no, cae al primero.
   useEffect(() => {
-    const accounts = channel === 'whatsapp' ? waAccounts : smsAccounts
-    setAccountId(accounts.length ? accounts[0].id : '')
-  }, [channel])
+    const list = channel === 'whatsapp' ? waAccounts : smsAccounts
+    setAccountId(prev => (list.some(a => a.id === prev) ? prev : (list[0]?.id ?? '')))
+  }, [channel, waAccounts, smsAccounts])
 
   useEffect(() => {
     if (mode !== 'search' || query.length < 1) { setResults([]); return }
@@ -151,8 +150,9 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone }) {
     return () => clearTimeout(t)
   }, [query, mode])
 
-  const accounts    = channel === 'whatsapp' ? waAccounts : smsAccounts
-  const noAccounts  = accounts.length === 0
+  const accounts       = channel === 'whatsapp' ? waAccounts : smsAccounts
+  const noAccounts     = accounts.length === 0
+  const selectedAccount = accounts.find(a => a.id === accountId) ?? null
   const accountOpts = accounts.map(a => ({
     value: a.id,
     label: `${a.name} · ${a.phone_number ?? a.instance_name ?? '—'}`,
@@ -214,8 +214,18 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone }) {
                 <AlertTriangle size={14} strokeWidth={1.75} /> {channel === 'whatsapp' ? 'Ningún número WhatsApp conectado' : 'Ningún gateway SMS online'}
               </div>
             ) : (
-              <SelectMenu value={accountId} onChange={setAccountId} options={accountOpts}
-                leadingIcon={<PhoneCall size={15} className="shrink-0 text-muted-foreground" />} placeholder="Elegir cuenta" />
+              <>
+                <SelectMenu value={accountId} onChange={setAccountId} options={accountOpts}
+                  leadingIcon={<PhoneCall size={15} className="shrink-0 text-muted-foreground" />} placeholder="Elegir cuenta" />
+                {selectedAccount && (
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    {channel === 'sms' ? 'El SMS saldrá desde' : 'El mensaje saldrá desde'}{' '}
+                    <span className="font-mono font-medium text-foreground">
+                      {selectedAccount.phone_number ?? selectedAccount.instance_name ?? '—'}
+                    </span>
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -1032,7 +1042,12 @@ export default function InboxPage() {
                   </p>
                   <div className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
                     <span className="font-mono">{selected.is_group ? '👥 Grupo' : selected.contact_phone}</span>
-                    {selected.account_name && <span className="flex items-center gap-1"><PhoneCall size={10} /> vía {selected.account_name}</span>}
+                    {selected.account_name && (
+                      <span className="flex items-center gap-1" title="Número desde el que salen tus respuestas en esta conversación">
+                        <PhoneCall size={10} /> vía {selected.account_name}
+                        {selected.account_phone && <span className="font-mono">· {selected.account_phone}</span>}
+                      </span>
+                    )}
                     {selected.channel === 'whatsapp' && <PresenceLabel presence={presence} />}
                   </div>
                 </div>
@@ -1143,7 +1158,10 @@ export default function InboxPage() {
 
       {showNew && (
         <NewMessageModal
-          initialChannel={newMsgOpts?.channel}
+          // Hereda la vía filtrada (y su canal) para que el mensaje salga del
+          // mismo número que estás viendo. En "Todas las vías" no fuerza nada.
+          initialAccountId={accountFilter || undefined}
+          initialChannel={newMsgOpts?.channel ?? accounts.find(a => a.id === accountFilter)?.channel}
           initialPhone={newMsgOpts?.phone}
           onClose={() => { setShowNew(false); setNewMsgOpts(null) }}
           onSent={async (conv) => { setShowNew(false); setNewMsgOpts(null); await loadConversations(); if (conv) openConversation(conv) }}
