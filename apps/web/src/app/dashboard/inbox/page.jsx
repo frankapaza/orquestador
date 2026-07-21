@@ -221,7 +221,9 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initia
             ) : (
               <>
                 <SelectMenu value={accountId} onChange={setAccountId} options={accountOpts}
-                  leadingIcon={<PhoneCall size={15} className="shrink-0 text-muted-foreground" />} placeholder="Elegir número..." />
+                  className={cn(!accountId && 'border-amber-400 ring-2 ring-amber-200')}
+                  leadingIcon={<PhoneCall size={15} className={cn('shrink-0', accountId ? 'text-muted-foreground' : 'text-amber-600')} />}
+                  placeholder="Elegir número..." />
                 {selectedAccount ? (
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     {channel === 'sms' ? 'El SMS saldrá desde' : 'El mensaje saldrá desde'}{' '}
@@ -230,9 +232,9 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initia
                     </span>
                   </p>
                 ) : (
-                  <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700">
-                    <AlertTriangle size={13} strokeWidth={1.75} className="mt-px shrink-0" />
-                    Tienes {accounts.length} números disponibles: elige desde cuál enviar.
+                  <p className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-medium leading-snug text-amber-700">
+                    <AlertTriangle size={14} strokeWidth={1.75} className="mt-px shrink-0" />
+                    Tienes {accounts.length} números {channel === 'sms' ? 'SMS' : 'de WhatsApp'}: elige arriba desde cuál enviar para continuar.
                   </p>
                 )}
               </>
@@ -338,7 +340,11 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initia
 
           <div className="flex gap-3">
             <Button type="submit" disabled={sending || noAccounts || !accountId || !message.trim() || !destination} className="flex-1">
-              {sending ? <><Loader2 size={14} className="animate-spin" /> Enviando...</> : <><Send size={14} strokeWidth={1.75} /> Enviar</>}
+              {sending
+                ? <><Loader2 size={14} className="animate-spin" /> Enviando...</>
+                : !accountId && !noAccounts
+                ? <><PhoneCall size={14} strokeWidth={1.75} /> Elige un número</>
+                : <><Send size={14} strokeWidth={1.75} /> Enviar</>}
             </Button>
             <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancelar</Button>
           </div>
