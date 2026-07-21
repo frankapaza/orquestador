@@ -43,10 +43,20 @@ export class AndroidSmsAdapter {
       ...(body ? { body: JSON.stringify(body) } : {}),
     })
     const data = await res.json().catch(() => ({}))
-    if (!res.ok) throw Object.assign(
-      new Error(data.message ?? `SMS Gateway error ${res.status}`),
-      { status: res.status, data }
-    )
+    if (!res.ok) {
+      // Ojo: el gateway a veces responde message:"" y con `??` el Error quedaba sin
+      // texto; aguas arriba un error vacío se tomaba como éxito. Siempre debe haber
+      // un mensaje no vacío, con el status para poder diagnosticar.
+      const detail =
+        (typeof data?.message === 'string' && data.message.trim()) ||
+        (typeof data?.error === 'string' && data.error.trim()) ||
+        (Object.keys(data ?? {}).length ? JSON.stringify(data) : '') ||
+        res.statusText || 'sin detalle'
+      throw Object.assign(
+        new Error(`SMS Gateway ${res.status}: ${detail}`),
+        { status: res.status, data }
+      )
+    }
     return data
   }
 

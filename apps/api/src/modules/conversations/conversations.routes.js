@@ -124,7 +124,7 @@ export async function conversationsRoutes(fastify) {
         await sql`UPDATE sms_accounts SET last_used_at = now(), sent_today = sent_today + 1 WHERE id = ${account.id}`
       }
     } catch (err) {
-      error = err.message
+      error = err?.message?.trim() || 'Error desconocido al enviar'
     }
 
     // Crear o recuperar conversación (teléfono homologado a +E.164 para no duplicar)
@@ -265,6 +265,7 @@ export async function conversationsRoutes(fastify) {
     try {
       if (conv.channel === 'whatsapp') {
         const [account] = await sql`SELECT * FROM whatsapp_accounts WHERE id = ${conv.account_id}`
+        if (!account) throw new Error('El número de WhatsApp de esta conversación ya no existe')
         let result
         if (account.provider === 'baileys') {
           result = await baileysManager.send(account.instance_name, {
@@ -282,13 +283,17 @@ export async function conversationsRoutes(fastify) {
         await sql`UPDATE whatsapp_accounts SET last_used_at = now(), sent_today = sent_today + 1 WHERE id = ${account.id}`
       } else if (conv.channel === 'sms') {
         const [account] = await sql`SELECT * FROM sms_accounts WHERE id = ${conv.account_id}`
+        if (!account) throw new Error('El gateway SMS de esta conversación ya no existe')
+        if (!body.body?.trim()) throw new Error('El SMS no puede ir vacío')
         const adapter = new AndroidSmsAdapter(account)
         const result = await adapter.send({ to: conv.contact_phone, body: body.body })
         externalId = result?.id ?? null
         await sql`UPDATE sms_accounts SET last_used_at = now(), sent_today = sent_today + 1 WHERE id = ${account.id}`
       }
     } catch (err) {
-      error = err.message
+      // Nunca dejar el error vacío: aguas abajo `error ? 'failed' : 'sent'` tomaría
+      // un string vacío como envío exitoso y el mensaje quedaría marcado como enviado.
+      error = err?.message?.trim() || 'Error desconocido al enviar'
     }
 
     const [msg] = await sql`
