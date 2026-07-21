@@ -645,6 +645,8 @@ export default function InboxPage() {
   const [aiSummaryError, setAiSummaryError]     = useState(null)
   const [aiSummaryText, setAiSummaryText]       = useState(null)
   const [statusActionError, setStatusActionError] = useState(null)
+  // Emisor elegido en el composer. Por defecto, el de la conversación abierta.
+  const [composerAccountId, setComposerAccountId] = useState('')
 
   const loadConversations = useCallback(() => {
     const params = new URLSearchParams()
@@ -792,6 +794,7 @@ export default function InboxPage() {
 
   async function openConversation(conv) {
     setSelected(conv)
+    setComposerAccountId(conv.account_id ?? '') // el emisor arranca en el de la conversación
     setPresence(null) // reset hasta confirmar
     setShowAiSummary(false); setAiSummaryText(null); setAiSummaryError(null) // reset resumen IA al cambiar de chat
     setStatusActionError(null)
@@ -834,6 +837,24 @@ export default function InboxPage() {
         mediaUrl = r.data.url; mediaType = r.data.type; mediaCaption = replyText.trim() || attachPreview.filename
         setUploading(false)
       }
+      // Emisor distinto al de la conversación → es otro hilo (una conversación es
+      // única por contacto + número emisor). Se envía por /messages/send, que crea
+      // o recupera esa conversación, y saltamos a ella.
+      if (composerAccountId && composerAccountId !== selected.account_id) {
+        const res = await api.post('/messages/send', {
+          channel:    selected.channel,
+          account_id: composerAccountId,
+          to:         selected.contact_phone,
+          message:    replyText.trim() || attachPreview?.filename || '(archivo)',
+          media_url:  mediaUrl ?? undefined,
+          media_type: mediaType ?? undefined,
+        })
+        setReplyText(''); clearAttach()
+        await loadConversations()
+        if (res?.data?.conversation) await openConversation(res.data.conversation)
+        return
+      }
+
       const r = await api.post(`/conversations/${selected.id}/reply`, {
         body: attachPreview ? undefined : replyText.trim(),
         media_url: mediaUrl ?? undefined, media_type: mediaType ?? undefined, media_caption: mediaCaption ?? undefined,
@@ -885,6 +906,18 @@ export default function InboxPage() {
     return (c.contact_name ?? '').toLowerCase().includes(q) || (c.contact_phone ?? '').includes(q)
   })
   const totalUnread = conversations.reduce((a, c) => a + (c.unread_count > 0 ? 1 : 0), 0)
+
+  // Emisores disponibles para el chat abierto: mismo canal y operativos. La lista
+  // `accounts` ya viene filtrada por rol desde la API (un asesor solo ve los suyos,
+  // el administrador los ve todos). Se incluye siempre el de la conversación para
+  // que el selector muestre su valor aunque ahora esté caído.
+  const composerAccounts = selected
+    ? accounts.filter(a =>
+        a.channel === selected.channel &&
+        (a.id === selected.account_id || (a.is_active !== false && (selected.channel === 'whatsapp' ? a.is_connected : a.is_online))))
+    : []
+  const composerAccount = composerAccounts.find(a => a.id === composerAccountId) ?? null
+  const emisorCambiado  = !!selected && !!composerAccountId && composerAccountId !== selected.account_id
 
   return (
     <div className="-m-6 flex overflow-hidden" style={{ height: 'calc(100vh - 49px)' }}>
@@ -1105,6 +1138,37 @@ export default function InboxPage() {
                   <button type="button" onClick={clearAttach} className="shrink-0 text-muted-foreground hover:text-red-500"><X size={14} strokeWidth={1.75} /></button>
                 </div>
               )}
+              {/* Enviar desde: emisor de este mensaje */}
+              {composerAccounts.length > 0 && (
+                <div className="mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Enviar desde</span>
+                    <div className="min-w-0 flex-1">
+                      <SelectMenu
+                        value={composerAccountId}
+                        onChange={setComposerAccountId}
+                        className="h-9"
+                        leadingIcon={<PhoneCall size={14} className="shrink-0 text-muted-foreground" />}
+                        options={composerAccounts.map(a => ({
+                          value: a.id,
+                          label: `${a.name} · ${a.phone_number ?? a.instance_name ?? '—'}`,
+                          icon: <span className={cn('h-2 w-2 shrink-0 rounded-full', a.channel === 'sms' ? 'bg-violet-500' : 'bg-green-500')} />,
+                        }))}
+                      />
+                    </div>
+                  </div>
+                  {emisorCambiado && (
+                    <p className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-snug text-amber-700">
+                      <AlertTriangle size={13} strokeWidth={1.75} className="mt-px shrink-0" />
+                      <span>
+                        Saldrá desde <b className="font-mono">{composerAccount?.phone_number ?? composerAccount?.instance_name}</b>, que no es el número de este chat.
+                        Para el contacto será una conversación aparte y se abrirá ese hilo.
+                      </span>
+                    </p>
+                  )}
+                </div>
+              )}
+
               <form onSubmit={sendReply} className="flex items-end gap-2">
                 {selected.channel === 'whatsapp' && (
                   <>
