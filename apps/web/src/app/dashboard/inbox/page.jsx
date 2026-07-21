@@ -135,10 +135,15 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initia
   }, [])
 
   // Mantiene la cuenta elegida mientras siga siendo válida para el canal actual
-  // (así no se pierde la vía heredada del filtro); si no, cae al primero.
+  // (así no se pierde la vía heredada del filtro). Si no hay una válida: con un
+  // único número se autoselecciona; con varios se deja vacío para que el usuario
+  // elija a conciencia y no se envíe desde un número arbitrario.
   useEffect(() => {
     const list = channel === 'whatsapp' ? waAccounts : smsAccounts
-    setAccountId(prev => (list.some(a => a.id === prev) ? prev : (list[0]?.id ?? '')))
+    setAccountId(prev => {
+      if (list.some(a => a.id === prev)) return prev
+      return list.length === 1 ? list[0].id : ''
+    })
   }, [channel, waAccounts, smsAccounts])
 
   useEffect(() => {
@@ -169,7 +174,7 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initia
   async function send(e) {
     e.preventDefault()
     if (!destination) { setError(mode === 'search' ? 'Selecciona un contacto' : 'Ingresa un número válido'); return }
-    if (!accountId)   { setError('No hay cuentas disponibles para este canal'); return }
+    if (!accountId)   { setError('Elige el número desde el que quieres enviar'); return }
     setSending(true); setError(null)
     try {
       const r = await api.post('/messages/send', {
@@ -216,13 +221,18 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initia
             ) : (
               <>
                 <SelectMenu value={accountId} onChange={setAccountId} options={accountOpts}
-                  leadingIcon={<PhoneCall size={15} className="shrink-0 text-muted-foreground" />} placeholder="Elegir cuenta" />
-                {selectedAccount && (
+                  leadingIcon={<PhoneCall size={15} className="shrink-0 text-muted-foreground" />} placeholder="Elegir número..." />
+                {selectedAccount ? (
                   <p className="mt-1.5 text-xs text-muted-foreground">
                     {channel === 'sms' ? 'El SMS saldrá desde' : 'El mensaje saldrá desde'}{' '}
                     <span className="font-mono font-medium text-foreground">
                       {selectedAccount.phone_number ?? selectedAccount.instance_name ?? '—'}
                     </span>
+                  </p>
+                ) : (
+                  <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700">
+                    <AlertTriangle size={13} strokeWidth={1.75} className="mt-px shrink-0" />
+                    Tienes {accounts.length} números disponibles: elige desde cuál enviar.
                   </p>
                 )}
               </>
@@ -327,7 +337,7 @@ function NewMessageModal({ onClose, onSent, initialChannel, initialPhone, initia
           {error && <div className="flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><XCircle size={14} strokeWidth={1.75} /> {error}</div>}
 
           <div className="flex gap-3">
-            <Button type="submit" disabled={sending || noAccounts || !message.trim() || !destination} className="flex-1">
+            <Button type="submit" disabled={sending || noAccounts || !accountId || !message.trim() || !destination} className="flex-1">
               {sending ? <><Loader2 size={14} className="animate-spin" /> Enviando...</> : <><Send size={14} strokeWidth={1.75} /> Enviar</>}
             </Button>
             <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancelar</Button>
