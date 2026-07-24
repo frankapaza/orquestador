@@ -2,7 +2,27 @@ import { sql } from '../../lib/db.js'
 import { baileysManager } from '../whatsapp/baileys.manager.js'
 import { resolveAiSettings } from '../whatsapp/warmup/ai.generator.js'
 import { isActiveNow } from '../whatsapp/warmup/warmup.service.js'
-import { resolveVars } from './assistant.vars.js'
+import { resolveVars, extractVars } from './assistant.vars.js'
+
+// Valores que NO son datos reales: relleno de plantilla, vacíos, "no aplica".
+// Se tratan como DESCONOCIDO para que la IA no los repita ni construya sobre ellos.
+function isPlaceholder(v) {
+  const s = String(v ?? '').trim()
+  return !s || /^(ejemplos?|example|placeholder|x{2,}|-{2,}|\.{2,}|_{2,}|n\/?a|na|null|none|tbd|pendiente|sin dato)$/i.test(s)
+}
+
+// Reglas duras anti-invención. Van al final del prompt del sistema (máxima
+// prioridad). Cobranza: un dato inventado es un problema legal/reputacional.
+const GUARDRAIL = `
+====================
+REGLAS ESTRICTAS DE DATOS (prioridad máxima, obligatorias):
+1. Solo puedes afirmar montos, fechas, números de factura, formas de pago, nombres de empresa o cualquier dato del caso si aparecen EXACTOS en "DATOS DEL CLIENTE". Nada fuera de ahí es real.
+2. PROHIBIDO inventar, suponer, estimar, redondear o dar de ejemplo cualquier dato que no esté en esa lista. Es mejor NO dar el dato que dar uno inventado.
+3. No cambies el formato de los datos: no agregues símbolos de moneda ($, S/) ni separadores de miles, y no conviertas monedas ni fechas. Cópialos tal cual están.
+4. Si un dato aparece como (NO DISPONIBLE) o no está en la lista, trátalo como DESCONOCIDO: no lo menciones y no lo inventes.
+5. Si el cliente pregunta por un dato que no tienes, dile que lo vas a verificar con un asesor. NUNCA lo inventes.
+6. No inventes nombres de personas, sucursales, direcciones ni datos de contacto.
+====================`
 
 const digits = p => (p ?? '').replace(/\D/g, '')
 
@@ -39,7 +59,9 @@ async function chatComplete({ baseUrl, model, apiKey }, messages) {
   const res = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, messages, temperature: 0.6 }),
+    // Temperatura baja: es un asistente de datos (cobranza), no creativo. Menos
+    // temperatura = mucha menos tendencia a inventar montos/fechas/facturas.
+    body: JSON.stringify({ model, messages, temperature: 0.2 }),
   })
   if (!res.ok) {
     const detail = await res.text().catch(() => '')
@@ -118,13 +140,27 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
   const greeting = resolveVars(asst.greeting, ctx)
   const history = await loadHistory(conversationId, asst.history_limit)
 
+  // Bloque de datos ciertos: enumera cada variable del asistente con su valor real,
+  // marcando (NO DISPONIBLE) los vacíos/placeholder. Así la IA sabe qué SÍ puede
+  // decir y qué no existe, en vez de rellenarlo inventando.
+  const datosLines = []
+  if (!isPlaceholder(ctx.NOMBRE_CLIENTE)) datosLines.push(`- Nombre del cliente: ${ctx.NOMBRE_CLIENTE}`)
+  for (const k of extractVars(asst)) {
+    datosLines.push(`- ${k}: ${isPlaceholder(ctx[k]) ? '(NO DISPONIBLE)' : ctx[k]}`)
+  }
+  const datosBlock = datosLines.length
+    ? `\n\nDATOS DEL CLIENTE (lo único que sabes con certeza; nada fuera de esta lista es real):\n${datosLines.join('\n')}`
+    : `\n\nDATOS DEL CLIENTE: no tienes ningún dato específico del cliente. No menciones montos, fechas ni facturas.`
+
   const messages = [
     {
       role: 'system',
       content:
         prompt +
         (greeting ? `\n\nSaludo inicial sugerido (úsalo solo si aún no has saludado al cliente): ${greeting}` : '') +
-        `\n\nResponde en español, breve y natural para WhatsApp. No inventes datos que no tengas.`,
+        datosBlock +
+        `\n\nResponde en español, breve y natural para WhatsApp.` +
+        GUARDRAIL,
     },
     ...history,
   ]
