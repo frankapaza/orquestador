@@ -143,14 +143,26 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
   // Bloque de datos ciertos: enumera cada variable del asistente con su valor real,
   // marcando (NO DISPONIBLE) los vacíos/placeholder. Así la IA sabe qué SÍ puede
   // decir y qué no existe, en vez de rellenarlo inventando.
+  const excelVars = extractVars(asst)
   const datosLines = []
   if (!isPlaceholder(ctx.NOMBRE_CLIENTE)) datosLines.push(`- Nombre del cliente: ${ctx.NOMBRE_CLIENTE}`)
-  for (const k of extractVars(asst)) {
+  for (const k of excelVars) {
     datosLines.push(`- ${k}: ${isPlaceholder(ctx[k]) ? '(NO DISPONIBLE)' : ctx[k]}`)
   }
   const datosBlock = datosLines.length
     ? `\n\nDATOS DEL CLIENTE (lo único que sabes con certeza; nada fuera de esta lista es real):\n${datosLines.join('\n')}`
     : `\n\nDATOS DEL CLIENTE: no tienes ningún dato específico del cliente. No menciones montos, fechas ni facturas.`
+
+  // Si NINGÚN dato de Excel está disponible (todo vacío/placeholder), la IA no
+  // tiene absolutamente nada que informar: prohibición total de dar cifras.
+  const sinDatos = excelVars.length > 0 && excelVars.every(k => isPlaceholder(ctx[k]))
+  const bloqueoTotal = sinDatos
+    ? `\n\n🚫 SIN DATOS DEL CLIENTE: no tienes NINGÚN dato real de esta persona (factura, monto, fecha y forma de pago están NO DISPONIBLE). Tienes ESTRICTAMENTE PROHIBIDO mencionar o inventar cualquier factura, monto, fecha o forma de pago. Si el cliente te pide los detalles de su deuda o cuenta, responde algo como: "Con gusto. Déjame verificar tu información con un asesor y te comparto los detalles a la brevedad." Bajo ninguna circunstancia des un número.`
+    : ''
+
+  // Antídoto contra historial contaminado: mensajes previos de la IA pudieron
+  // contener datos inventados; no deben tomarse como verdad.
+  const ignorarHistorial = `\n\nIMPORTANTE: IGNORA cualquier monto, número de factura, fecha o dato que aparezca en mensajes ANTERIORES de esta conversación — pudieron ser errores previos. La ÚNICA fuente válida de datos es la lista "DATOS DEL CLIENTE" de arriba.`
 
   const messages = [
     {
@@ -160,7 +172,9 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
         (greeting ? `\n\nSaludo inicial sugerido (úsalo solo si aún no has saludado al cliente): ${greeting}` : '') +
         datosBlock +
         `\n\nResponde en español, breve y natural para WhatsApp.` +
-        GUARDRAIL,
+        GUARDRAIL +
+        bloqueoTotal +
+        ignorarHistorial,
     },
     ...history,
   ]
