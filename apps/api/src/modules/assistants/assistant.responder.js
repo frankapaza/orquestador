@@ -135,10 +135,18 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
     return
   }
 
-  const ctx     = await buildContext(clientId, contactPhone, contactName)
-  const prompt  = resolveVars(asst.system_prompt, ctx)
-  const greeting = resolveVars(asst.greeting, ctx)
-  const history = await loadHistory(conversationId, asst.history_limit)
+  const ctx = await buildContext(clientId, contactPhone, contactName)
+
+  // (FIX) Neutraliza valores placeholder/vacíos ("ejemplo", etc.) ANTES de resolver
+  // el prompt. Antes el prompt se llenaba con "ejemplo" y el modelo veía literal
+  // "Factura: ejemplo" y lo tomaba como un dato a completar → inventaba. Ahora ve
+  // "Factura: (no disponible)" y entiende que ese dato no existe.
+  const ctxClean = {}
+  for (const [k, v] of Object.entries(ctx)) ctxClean[k] = isPlaceholder(v) ? '(no disponible)' : v
+
+  const prompt   = resolveVars(asst.system_prompt, ctxClean)
+  const greeting = resolveVars(asst.greeting, ctxClean)
+  const history  = await loadHistory(conversationId, asst.history_limit)
 
   // Bloque de datos ciertos: enumera cada variable del asistente con su valor real,
   // marcando (NO DISPONIBLE) los vacíos/placeholder. Así la IA sabe qué SÍ puede
@@ -153,11 +161,12 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
     ? `\n\nDATOS DEL CLIENTE (lo único que sabes con certeza; nada fuera de esta lista es real):\n${datosLines.join('\n')}`
     : `\n\nDATOS DEL CLIENTE: no tienes ningún dato específico del cliente. No menciones montos, fechas ni facturas.`
 
-  // Si NINGÚN dato de Excel está disponible (todo vacío/placeholder), la IA no
-  // tiene absolutamente nada que informar: prohibición total de dar cifras.
-  const sinDatos = excelVars.length > 0 && excelVars.every(k => isPlaceholder(ctx[k]))
-  const bloqueoTotal = sinDatos
-    ? `\n\n🚫 SIN DATOS DEL CLIENTE: no tienes NINGÚN dato real de esta persona (factura, monto, fecha y forma de pago están NO DISPONIBLE). Tienes ESTRICTAMENTE PROHIBIDO mencionar o inventar cualquier factura, monto, fecha o forma de pago. Si el cliente te pide los detalles de su deuda o cuenta, responde algo como: "Con gusto. Déjame verificar tu información con un asesor y te comparto los detalles a la brevedad." Bajo ninguna circunstancia des un número.`
+  // (FIX) Bloqueo POR CAMPO: cualquier dato faltante/placeholder queda prohibido.
+  // Antes se exigía que TODO estuviera vacío (every), y como el nombre real existe,
+  // el bloqueo nunca se activaba.
+  const faltantes = excelVars.filter(k => isPlaceholder(ctx[k]))
+  const bloqueoFaltantes = faltantes.length
+    ? `\n\n🚫 DATOS QUE NO TIENES (DESCONOCIDOS) — PROHIBIDO MENCIONARLOS O INVENTARLOS: ${faltantes.join(', ')}.\nEstos datos NO existen para ti. NO los menciones, NO inventes cifras/fechas/facturas, NO uses valores de ejemplo. Si el cliente pregunta por alguno (su monto, su factura, su vencimiento, etc.), responde EXACTAMENTE algo como: "Déjame verificar ese dato con un asesor y te lo confirmo enseguida." Jamás afirmes un número o dato que no esté en DATOS DEL CLIENTE.`
     : ''
 
   // Antídoto contra historial contaminado: mensajes previos de la IA pudieron
@@ -173,7 +182,7 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
         datosBlock +
         `\n\nResponde en español, breve y natural para WhatsApp.` +
         GUARDRAIL +
-        bloqueoTotal +
+        bloqueoFaltantes +
         ignorarHistorial,
     },
     ...history,
