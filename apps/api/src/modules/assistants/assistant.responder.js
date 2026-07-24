@@ -39,6 +39,7 @@ async function buildContext(clientId, contactPhone, contactName) {
     JOIN contacts c ON c.id = cp.contact_id
     WHERE c.client_id = ${clientId}
       AND regexp_replace(COALESCE(cp.phone_dial, '') || cp.phone, '\D', '', 'g') = ${digits(contactPhone)}
+    ORDER BY c.created_at DESC
     LIMIT 1
   `.catch(() => [])
   if (row) {
