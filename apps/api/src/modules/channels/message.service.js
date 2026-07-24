@@ -47,6 +47,17 @@ export async function processIncoming({ clientId, channel, accountId, accountTyp
   }
 
   const conv = await upsertConversation({ clientId, channel, contactPhone, contactName, accountId, accountType, isGroup })
+
+  // Un mensaje entrante REABRE una conversación cerrada: "cerrado" es solo un
+  // estado visual (bandeja sin actividad pendiente), no un archivo permanente. Si
+  // no se reabre, el chat revivido queda oculto en la pestaña "Cerradas" mientras
+  // el Inbox muestra "Abiertas" por defecto — y la IA respondería a un chat que el
+  // usuario no ve.
+  if (conv.status === 'closed') {
+    await sql`UPDATE conversations SET status = 'open', closed_reason = NULL, closed_at = NULL WHERE id = ${conv.id}`
+    conv.status = 'open'
+  }
+
   const msg  = await saveMessage({
     clientId, conversationId: conv.id, channel,
     direction: 'inbound', from: contactPhone,

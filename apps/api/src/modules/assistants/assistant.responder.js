@@ -77,12 +77,11 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
   `
   if (!asst) return
 
-  // Estado y toggle de IA de la conversación.
-  const [conv] = await sql`SELECT ai_enabled, status, contact_phone FROM conversations WHERE id = ${conversationId}`
-  if (conv && conv.status === 'closed') {
-    console.log(`[Assistant][${instanceName}] no responde: conversación cerrada (requiere reapertura humana)`)
-    return
-  }
+  // Toggle de IA de la conversación. Nota: el estado "cerrado" es SOLO visual
+  // (separa la bandeja), NO apaga la IA — un chat cerrado que recibe un mensaje
+  // sigue siendo atendido. Para silenciar la IA en una conversación se usa
+  // ai_enabled = false (toma humana / opt-out).
+  const [conv] = await sql`SELECT ai_enabled, contact_phone FROM conversations WHERE id = ${conversationId}`
   if (conv && conv.ai_enabled === false) {
     console.log(`[Assistant][${instanceName}] no responde: IA desactivada en la conversación (toma humana / opt-out previo)`)
     return
