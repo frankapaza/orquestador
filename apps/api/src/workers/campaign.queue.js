@@ -4,9 +4,30 @@ import { sql } from '../lib/db.js'
 import { pickEmailAccount, sendOneEmail } from '../modules/sending/smtp.sender.js'
 import { getAdapterForCampaign } from '../modules/integrations/adapters/factory.js'
 import { pickWhatsappAccount, pickSmsAccount, sendWhatsapp, sendSms, checkWhatsappTarget, randomDelay } from '../modules/channels/channel.sender.js'
+import { bus } from '../lib/eventBus.js'
 import { env } from '../config/env.js'
 
 const QUEUE_NAME = 'campaign-jobs'
+
+// Empuja el progreso de la campaña por SSE (bus). El frontend actualiza la barra
+// sin polling. Best-effort: si falla, no rompe el envío.
+async function emitCampaignProgress(campaignId) {
+  try {
+    const [c] = await sql`
+      SELECT client_id, sent_count, failed_count, total_recipients, status
+      FROM campaigns WHERE id = ${campaignId}
+    `
+    if (!c) return
+    bus.emit(c.client_id, {
+      type:             'campaign:progress',
+      campaign_id:      campaignId,
+      sent_count:       Number(c.sent_count),
+      failed_count:     Number(c.failed_count),
+      total_recipients: Number(c.total_recipients),
+      status:           c.status,
+    })
+  } catch { /* no-op */ }
+}
 
 export const campaignQueue = new Queue(QUEUE_NAME, { connection: redis })
 
@@ -38,11 +59,13 @@ export async function enqueueCampaign(campaign) {
 
   if (recipients.length === 0) {
     await sql`UPDATE campaigns SET status = 'failed', completed_at = now() WHERE id = ${campaign.id}`
+    await emitCampaignProgress(campaign.id)
     return
   }
 
   // total_recipients refleja los destinos reales (un contacto puede aportar varios)
   await sql`UPDATE campaigns SET total_recipients = ${recipients.length} WHERE id = ${campaign.id}`
+  await emitCampaignProgress(campaign.id)
 
   const jobRows = recipients.map(r => ({
     campaign_id:     campaign.id,
@@ -132,6 +155,7 @@ export function startCampaignWorker() {
             WHERE campaign_id = ${campaign_id} AND contact_id = ${contact_id} ${destMatch}
           `
           await sql`UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ${campaign_id}`
+          await emitCampaignProgress(campaign_id)
           return { invalid: true }
         }
 
@@ -173,6 +197,7 @@ export function startCampaignWorker() {
         WHERE campaign_id = ${campaign_id} AND contact_id = ${contact_id} ${destMatch}
       `
       await sql`UPDATE campaigns SET sent_count = sent_count + 1 WHERE id = ${campaign_id}`
+      await emitCampaignProgress(campaign_id)
 
       return { sent: true, messageId, channel }
     },
@@ -192,6 +217,7 @@ export function startCampaignWorker() {
         AND COALESCE(recipient_email,'') = ${recipient_email ?? ''} AND COALESCE(phone_number,'') = ${phone_number ?? ''}
     `
     await sql`UPDATE campaigns SET failed_count = failed_count + 1 WHERE id = ${campaign_id}`
+    await emitCampaignProgress(campaign_id)
   })
 
   const queueEvents = new QueueEvents(QUEUE_NAME, { connection: redis })
@@ -203,6 +229,7 @@ export function startCampaignWorker() {
       `
       if (parseInt(count) === 0) {
         await sql`UPDATE campaigns SET status = 'completed', completed_at = now() WHERE id = ${c.id}`
+        await emitCampaignProgress(c.id)
       }
     }
   })
