@@ -197,10 +197,6 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
     ...history,
   ]
 
-  // DEBUG temporal: ver EXACTAMENTE qué recibe el modelo (si el prompt llega limpio
-  // con "(no disponible)" o todavía con "ejemplo", y cuántos mensajes de historial).
-  console.log(`[Assistant][debug ${instanceName}] faltantes=[${faltantes.join(',')}] bloqueo=${bloqueoFaltantes ? 'SI' : 'NO'} histMsgs=${history.length} model=${settings.model} temp | SYSTEM(0-400)="${messages[0].content.replace(/\s+/g, ' ').slice(0, 400)}"`)
-
   let reply
   try {
     reply = await chatComplete(settings, messages)
