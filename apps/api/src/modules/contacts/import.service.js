@@ -6,6 +6,7 @@ const COL_EMAIL      = ['email', 'correo', 'e-mail', 'mail']
 const COL_FIRST_NAME = ['first_name', 'firstname', 'nombre', 'name', 'first']
 const COL_LAST_NAME  = ['last_name', 'lastname', 'apellido', 'surname', 'last']
 const COL_PHONE = ['telefono', 'teléfono', 'phone', 'celular', 'movil', 'móvil', 'whatsapp', 'numero', 'número', 'msisdn', 'tel']
+const COL_DOCUMENT = ['documento', 'dni', 'ruc', 'ce', 'cedula', 'cédula', 'document', 'nif', 'identificacion', 'identificación', 'doc']
 
 function normalize(str) {
   return String(str ?? '').trim().toLowerCase().replace(/\s+/g, '_')
@@ -98,6 +99,7 @@ export function parseFile(buffer, filename) {
 // Igual que mapRows pero la clave obligatoria es el teléfono; el email es opcional.
 function mapRowsByPhone(headers, rows) {
   const phoneCol     = findCol(headers, COL_PHONE)
+  const documentCol  = findCol(headers, COL_DOCUMENT)
   const firstNameCol = findCol(headers, COL_FIRST_NAME)
   const lastNameCol  = findCol(headers, COL_LAST_NAME)
   const emailCol     = findCol(headers, COL_EMAIL)
@@ -105,8 +107,13 @@ function mapRowsByPhone(headers, rows) {
   if (!phoneCol) {
     throw new Error('No se encontro columna de telefono. Debe llamarse: telefono, phone, celular, movil o whatsapp')
   }
+  // El documento (DNI/RUC) es la identidad del contacto: obligatorio.
+  if (!documentCol) {
+    throw new Error('Falta la columna de documento. Debe llamarse: documento, dni, ruc o ce')
+  }
 
-  const known = new Set([phoneCol, firstNameCol, lastNameCol, emailCol].filter(Boolean))
+  // El documento es identidad, no una variable → NO va como columna de metadata.
+  const known = new Set([phoneCol, documentCol, firstNameCol, lastNameCol, emailCol].filter(Boolean))
   const metaCols = headers.filter(h => !known.has(h))
 
   const contacts = []
@@ -114,6 +121,11 @@ function mapRowsByPhone(headers, rows) {
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
+    const document = String(row[documentCol] ?? '').trim()
+    if (!document) {
+      skipped.push({ row: i + 2, value: '(sin documento)', reason: 'documento vacio' })
+      continue
+    }
     const phoneRaw = String(row[phoneCol] ?? '').trim()
     const digits = phoneRaw.replace(/\D/g, '')
     if (!digits || digits.length < 6) {
@@ -132,6 +144,7 @@ function mapRowsByPhone(headers, rows) {
     const email = emailCol ? String(row[emailCol] ?? '').trim().toLowerCase() : ''
 
     contacts.push({
+      document,
       phone:      phoneRaw,
       email:      email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
       first_name: firstNameCol ? String(row[firstNameCol] ?? '').trim() || null : null,

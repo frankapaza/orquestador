@@ -41,18 +41,20 @@ export async function enqueueCampaign(campaign) {
   if (channel === 'email') {
     recipients = await sql`
       SELECT c.id AS contact_id, ce.email AS recipient_email, NULL::text AS phone_number
-      FROM contacts c
+      FROM list_members lm
+      JOIN contacts c ON c.id = lm.contact_id
       JOIN contact_emails ce ON ce.contact_id = c.id ${sendAll ? sql`` : sql`AND ce.is_primary = true`}
-      WHERE c.list_id = ${campaign.list_id} AND c.is_subscribed = true
+      WHERE lm.list_id = ${campaign.list_id} AND c.is_subscribed = true
         AND ce.email IS NOT NULL AND ce.email <> ''
     `
   } else {
     recipients = await sql`
       SELECT c.id AS contact_id, NULL::text AS recipient_email,
              (COALESCE(cp.phone_dial, '') || cp.phone) AS phone_number
-      FROM contacts c
+      FROM list_members lm
+      JOIN contacts c ON c.id = lm.contact_id
       JOIN contact_phones cp ON cp.contact_id = c.id ${sendAll ? sql`` : sql`AND cp.is_primary = true`}
-      WHERE c.list_id = ${campaign.list_id} AND c.is_subscribed = true
+      WHERE lm.list_id = ${campaign.list_id} AND c.is_subscribed = true
         AND cp.phone IS NOT NULL AND cp.phone <> ''
     `
   }

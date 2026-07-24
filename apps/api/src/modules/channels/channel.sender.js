@@ -131,13 +131,14 @@ export async function sendWhatsapp({ campaign, contact, account, jid = null }) {
         clientId: campaign.client_id, channel: 'whatsapp', contactPhone: phone,
         contactName, accountId: account.id, accountType: 'whatsapp',
       })
-      // Ata la conversación al CONTACTO de esta campaña, para que el asistente
-      // siga la línea de datos de ESTA carga (su monto/factura), no la de otro
-      // contacto que comparta el número. Se actualiza en cada saludo → refleja la
-      // última campaña que escribió a este hilo.
-      if (contact.id) {
-        await sql`UPDATE conversations SET contact_id = ${contact.id} WHERE id = ${conv.id}`
-      }
+      // Snapshot de los datos de ESTA campaña en la conversación: el asistente lee
+      // de aquí, así el hilo conserva su propia línea de datos (su monto/factura)
+      // aunque el contacto (único por documento) tenga otros montos en otras
+      // campañas/días. Se actualiza en cada saludo → refleja la última campaña.
+      await sql`
+        UPDATE conversations SET contact_id = ${contact.id ?? null}, vars = ${sql.json(ctx)}
+        WHERE id = ${conv.id}
+      `
       await saveMessage({
         clientId: campaign.client_id, conversationId: conv.id, channel: 'whatsapp',
         direction: 'outbound', to: phone, body, externalId: messageId, status: 'sent',

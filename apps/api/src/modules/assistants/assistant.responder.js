@@ -31,11 +31,20 @@ const OPT_OUT = /^\s*(stop|baja|cancelar|no escribir|no molestar|dar de baja)\s*
 
 // Arma el contexto de variables del cliente: datos del contacto + su metadata
 // (columnas del Excel importado en la campaña) + teléfono.
-async function buildContext(clientId, contactPhone, contactName, contactId = null) {
+async function buildContext(clientId, contactPhone, contactName, { vars = null, contactId = null } = {}) {
   const ctx = { TELEFONO: contactPhone ?? '' }
-  // Fuente de datos preferida: el CONTACTO atado a la conversación (el de la campaña
-  // que la generó) → sigue su propia línea de datos. Solo si no hay (chat iniciado
-  // por el cliente, sin campaña), se cae al contacto más reciente por teléfono.
+
+  // Fuente de verdad #1: el snapshot de la campaña (conversations.vars). Congela los
+  // datos con los que se le escribió a este hilo → no se contamina con otras cargas.
+  if (vars && typeof vars === 'object' && Object.keys(vars).length) {
+    for (const [k, v] of Object.entries(vars)) ctx[k.toUpperCase()] = v == null ? '' : String(v)
+    if (!ctx.NOMBRE_CLIENTE) ctx.NOMBRE_CLIENTE = contactName ?? ''
+    if (!ctx.NOMBRE)         ctx.NOMBRE = contactName ?? ''
+    return ctx
+  }
+
+  // Fuente #2 (sin snapshot, ej. chat iniciado por el cliente): el contacto atado a
+  // la conversación; y si tampoco hay, el contacto más reciente por teléfono.
   const [row] = contactId
     ? await sql`
         SELECT first_name, last_name, metadata FROM contacts
@@ -112,7 +121,7 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
   // (separa la bandeja), NO apaga la IA — un chat cerrado que recibe un mensaje
   // sigue siendo atendido. Para silenciar la IA en una conversación se usa
   // ai_enabled = false (toma humana / opt-out).
-  const [conv] = await sql`SELECT ai_enabled, contact_phone, contact_id FROM conversations WHERE id = ${conversationId}`
+  const [conv] = await sql`SELECT ai_enabled, contact_phone, contact_id, vars FROM conversations WHERE id = ${conversationId}`
   if (conv && conv.ai_enabled === false) {
     console.log(`[Assistant][${instanceName}] no responde: IA desactivada en la conversación (toma humana / opt-out previo)`)
     return
@@ -144,7 +153,7 @@ export async function handleAssistantInbound({ instanceName, accountId, clientId
     return
   }
 
-  const ctx = await buildContext(clientId, contactPhone, contactName, conv?.contact_id ?? null)
+  const ctx = await buildContext(clientId, contactPhone, contactName, { vars: conv?.vars ?? null, contactId: conv?.contact_id ?? null })
 
   // (FIX) Neutraliza valores placeholder/vacíos ("ejemplo", etc.) ANTES de resolver
   // el prompt. Antes el prompt se llenaba con "ejemplo" y el modelo veía literal

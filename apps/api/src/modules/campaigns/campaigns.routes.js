@@ -91,7 +91,7 @@ export async function campaignsRoutes(fastify) {
       imported += await upsertContactsByPhone(req.user.sub, list.id, parsed.contacts.slice(i, i + BATCH))
     }
     await sql`
-      UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${list.id})
+      UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM list_members WHERE list_id = ${list.id})
       WHERE id = ${list.id}
     `
 
@@ -166,7 +166,7 @@ export async function campaignsRoutes(fastify) {
     }))
     const imported = await upsertContactsByPhone(req.user.sub, list.id, rows)
     await sql`
-      UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${list.id})
+      UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM list_members WHERE list_id = ${list.id})
       WHERE id = ${list.id}
     `
 

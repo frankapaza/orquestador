@@ -23,6 +23,7 @@ const listSchema = z.object({
 })
 
 const contactSchema = z.object({
+  document:      z.string().min(3).optional(),       // DNI/RUC — identidad del contacto
   email:         z.string().email().optional().or(z.literal('')),
   phone:         z.string().min(4).optional(),       // número nacional (sin código)
   phone_dial:    z.string().optional(),              // '+51'
@@ -46,47 +47,41 @@ async function upsertContactsByEmail(clientId, listId, rows) {
   if (!deduped.length) return 0
 
   const emails = deduped.map(r => r.email)
+  // Dedup por email a nivel CLIENTE (no por lista): un correo = un contacto.
   const existing = await sql`
     SELECT ce.email, ce.contact_id
     FROM contact_emails ce
     JOIN contacts c ON c.id = ce.contact_id
-    WHERE c.list_id = ${listId} AND ce.email IN ${sql(emails)}
+    WHERE c.client_id = ${clientId} AND ce.email IN ${sql(emails)}
   `
   const byEmail = new Map(existing.map(e => [e.email, e.contact_id]))
 
-  const toUpdate = deduped.filter(r => byEmail.has(r.email))
-  const toInsert = deduped.filter(r => !byEmail.has(r.email))
-
-  // Actualizar los contactos que ya existían (por email)
-  for (const r of toUpdate) {
-    await sql`
-      UPDATE contacts
-      SET first_name = ${r.first_name ?? null}, last_name = ${r.last_name ?? null},
-          metadata = ${sql.json(r.metadata ?? {})}
-      WHERE id = ${byEmail.get(r.email)}
-    `
-  }
-
-  // Insertar contactos nuevos + su correo principal en contact_emails
-  if (toInsert.length) {
-    const inserted = await sql`
-      INSERT INTO contacts ${sql(toInsert.map(r => ({
-        client_id:  clientId,
-        list_id:    listId,
-        first_name: r.first_name ?? null,
-        last_name:  r.last_name ?? null,
-        metadata:   r.metadata ?? {},
-      })), 'client_id', 'list_id', 'first_name', 'last_name', 'metadata')}
-      RETURNING id
-    `
-    const emailRows = inserted.map((c, i) => ({
-      contact_id: c.id, client_id: clientId, email: toInsert[i].email,
-      label: 'Principal', is_primary: true,
-    }))
-    await sql`
-      INSERT INTO contact_emails ${sql(emailRows, 'contact_id', 'client_id', 'email', 'label', 'is_primary')}
-      ON CONFLICT (contact_id, email) DO NOTHING
-    `
+  for (const r of deduped) {
+    let contactId = byEmail.get(r.email) ?? null
+    if (contactId) {
+      await sql`
+        UPDATE contacts
+        SET first_name = COALESCE(${r.first_name ?? null}, first_name),
+            last_name  = COALESCE(${r.last_name ?? null}, last_name),
+            document   = COALESCE(document, ${r.document ?? null}),
+            metadata   = COALESCE(metadata, '{}'::jsonb) || ${sql.json(r.metadata ?? {})}
+        WHERE id = ${contactId}
+      `
+    } else {
+      const [c] = await sql`
+        INSERT INTO contacts (client_id, document, first_name, last_name, metadata)
+        VALUES (${clientId}, ${r.document ?? null}, ${r.first_name ?? null}, ${r.last_name ?? null}, ${sql.json(r.metadata ?? {})})
+        RETURNING id
+      `
+      contactId = c.id
+      await sql`
+        INSERT INTO contact_emails (contact_id, client_id, email, label, is_primary)
+        VALUES (${contactId}, ${clientId}, ${r.email}, 'Principal', true)
+        ON CONFLICT (contact_id, email) DO NOTHING
+      `
+    }
+    // Membresía a la lista (sin duplicar el contacto).
+    await sql`INSERT INTO list_members (list_id, contact_id) VALUES (${listId}, ${contactId}) ON CONFLICT DO NOTHING`
   }
   return deduped.length
 }
@@ -131,14 +126,15 @@ export async function contactsRoutes(fastify) {
     // Teléfono y correo viven en contact_phones/contact_emails; traemos los principales.
     const contacts = await sql`
       SELECT c.*, cp.phone, cp.phone_dial, cp.phone_country, ce.email
-      FROM contacts c
+      FROM list_members lm
+      JOIN contacts c ON c.id = lm.contact_id
       LEFT JOIN contact_phones cp ON cp.contact_id = c.id AND cp.is_primary = true
       LEFT JOIN contact_emails ce ON ce.contact_id = c.id AND ce.is_primary = true
-      WHERE c.list_id = ${req.params.listId}
-      ORDER BY c.created_at DESC
+      WHERE lm.list_id = ${req.params.listId}
+      ORDER BY lm.added_at DESC
       LIMIT ${limit} OFFSET ${offset}
     `
-    const [{ count }] = await sql`SELECT COUNT(*) FROM contacts WHERE list_id = ${req.params.listId}`
+    const [{ count }] = await sql`SELECT COUNT(*) FROM list_members WHERE list_id = ${req.params.listId}`
 
     return { contacts, total: parseInt(count), page: parseInt(page), limit: parseInt(limit) }
   })
@@ -150,20 +146,34 @@ export async function contactsRoutes(fastify) {
     const body = contactSchema.parse(req.body)
     // Teléfono y correo van SEPARADOS a sus propias tablas (fuente única). contacts no los guarda.
     const sp = splitPhone(body.phone, { country: body.phone_country, dial: body.phone_dial })
-    const [contact] = await sql`
-      INSERT INTO contacts (client_id, list_id, first_name, last_name, metadata)
-      VALUES (
-        ${req.user.sub}, ${req.params.listId},
-        ${body.first_name ?? null}, ${body.last_name ?? null},
-        ${sql.json(body.metadata)}
-      )
-      RETURNING *
-    `
+    // Identidad por documento: si viene y ya existe, se reutiliza (no se duplica).
+    let contact = null
+    if (body.document) {
+      const [existing] = await sql`
+        SELECT * FROM contacts WHERE client_id = ${req.user.sub} AND document = ${body.document} LIMIT 1
+      `
+      contact = existing ?? null
+    }
+    if (!contact) {
+      const [row] = await sql`
+        INSERT INTO contacts (client_id, document, first_name, last_name, metadata)
+        VALUES (
+          ${req.user.sub}, ${body.document ?? null},
+          ${body.first_name ?? null}, ${body.last_name ?? null},
+          ${sql.json(body.metadata)}
+        )
+        RETURNING *
+      `
+      contact = row
+    }
+    // Membresía a la lista (sin duplicar el contacto).
+    await sql`INSERT INTO list_members (list_id, contact_id) VALUES (${req.params.listId}, ${contact.id}) ON CONFLICT DO NOTHING`
     // El teléfono se registra en contact_phones como Principal.
     if (contact && sp.national) {
       await sql`
         INSERT INTO contact_phones (contact_id, client_id, phone, phone_dial, phone_country, label, is_primary)
-        VALUES (${contact.id}, ${req.user.sub}, ${sp.national}, ${sp.dial || null}, ${sp.country || null}, 'Móvil', true)
+        VALUES (${contact.id}, ${req.user.sub}, ${sp.national}, ${sp.dial || null}, ${sp.country || null}, 'Móvil',
+                NOT EXISTS (SELECT 1 FROM contact_phones WHERE contact_id = ${contact.id}))
         ON CONFLICT (contact_id, phone) DO NOTHING
       `
     }
@@ -171,11 +181,12 @@ export async function contactsRoutes(fastify) {
     if (contact && body.email) {
       await sql`
         INSERT INTO contact_emails (contact_id, client_id, email, label, is_primary)
-        VALUES (${contact.id}, ${req.user.sub}, ${body.email}, 'Principal', true)
+        VALUES (${contact.id}, ${req.user.sub}, ${body.email}, 'Principal',
+                NOT EXISTS (SELECT 1 FROM contact_emails WHERE contact_id = ${contact.id}))
         ON CONFLICT (contact_id, email) DO NOTHING
       `
     }
-    await sql`UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${req.params.listId}) WHERE id = ${req.params.listId}`
+    await sql`UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM list_members WHERE list_id = ${req.params.listId}) WHERE id = ${req.params.listId}`
     // Devolvemos el contacto con su correo/teléfono principal (para la UI), aunque no vivan en contacts.
     return reply.code(201).send({ ...contact, email: body.email || null, phone: sp.national || null, phone_dial: sp.dial || null, phone_country: sp.country || null })
   })
@@ -225,7 +236,7 @@ export async function contactsRoutes(fastify) {
 
     await sql`
       UPDATE contact_lists
-      SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${req.params.listId})
+      SET total_count = (SELECT COUNT(*) FROM list_members WHERE list_id = ${req.params.listId})
       WHERE id = ${req.params.listId}
     `
 
@@ -244,7 +255,7 @@ export async function contactsRoutes(fastify) {
 
     const { contacts } = bulkImportSchema.parse(req.body)
     const imported = await upsertContactsByEmail(req.user.sub, req.params.listId, contacts)
-    await sql`UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM contacts WHERE list_id = ${req.params.listId}) WHERE id = ${req.params.listId}`
+    await sql`UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM list_members WHERE list_id = ${req.params.listId}) WHERE id = ${req.params.listId}`
     return { imported }
   })
 
@@ -334,14 +345,17 @@ export async function contactsRoutes(fastify) {
   fastify.get('/contacts/:id/360', auth, async (req, reply) => {
     const clientId = req.user.sub
 
-    // Info del contacto + sus listas
-    const contacts = await sql`
-      SELECT c.*, cl.id AS list_id, cl.name AS list_name
-      FROM contacts c
-      JOIN contact_lists cl ON cl.id = c.list_id
-      WHERE c.id = ${req.params.id} AND c.client_id = ${clientId}
+    // Info del contacto + sus listas (muchos-a-muchos vía list_members)
+    const [contact0] = await sql`
+      SELECT c.* FROM contacts c WHERE c.id = ${req.params.id} AND c.client_id = ${clientId}
     `
-    if (!contacts.length) return reply.code(404).send({ error: 'Contacto no encontrado' })
+    if (!contact0) return reply.code(404).send({ error: 'Contacto no encontrado' })
+    const listRows = await sql`
+      SELECT cl.id, cl.name FROM list_members lm
+      JOIN contact_lists cl ON cl.id = lm.list_id
+      WHERE lm.contact_id = ${req.params.id}
+      ORDER BY cl.created_at
+    `
 
     const phones = await sql`SELECT * FROM contact_phones WHERE contact_id = ${req.params.id} ORDER BY is_primary DESC, created_at`
     const emails = await sql`SELECT * FROM contact_emails WHERE contact_id = ${req.params.id} ORDER BY is_primary DESC, created_at`
@@ -350,13 +364,13 @@ export async function contactsRoutes(fastify) {
     const primaryPhone = phones.find(p => p.is_primary) ?? phones[0] ?? null
     const primaryEmail = emails.find(e => e.is_primary) ?? emails[0] ?? null
     const contact = {
-      ...contacts[0],
+      ...contact0,
       phone:      primaryPhone?.phone ?? null,
       phone_dial: primaryPhone?.phone_dial ?? null,
       email:      primaryEmail?.email ?? null,
       phones,
       emails,
-      lists: contacts.map(c => ({ id: c.list_id, name: c.list_name })),
+      lists: listRows.map(l => ({ id: l.id, name: l.name })),
     }
     // Números completos (E.164) de TODOS los teléfonos del contacto, para emparejar mensajes.
     const phoneNumbers = phones.map(fullPhone).filter(Boolean)
@@ -569,10 +583,8 @@ export async function contactsRoutes(fastify) {
             'label', p.label, 'is_primary', p.is_primary
           ) ORDER BY p.is_primary DESC, p.created_at)
           FROM contact_phones p WHERE p.contact_id = c.id
-        ) AS phones,
-        cl.name AS list_name
+        ) AS phones
       FROM contacts c
-      JOIN contact_lists cl ON cl.id = c.list_id
       LEFT JOIN contact_phones cp ON cp.contact_id = c.id
       LEFT JOIN contact_phones pp ON pp.contact_id = c.id AND pp.is_primary = true
       LEFT JOIN contact_emails ce ON ce.contact_id = c.id
@@ -600,21 +612,24 @@ export async function contactsRoutes(fastify) {
         c.id, c.first_name, c.last_name,
         pe.email,
         pp.phone, pp.phone_dial,
-        c.metadata, c.is_subscribed, c.created_at,
-        cl.id AS list_id, cl.name AS list_name
+        c.metadata, c.is_subscribed, c.created_at
       FROM contacts c
-      JOIN contact_lists cl ON cl.id = c.list_id
-      LEFT JOIN contact_phones cp ON cp.contact_id = c.id
+      JOIN contact_phones cp ON cp.contact_id = c.id
       LEFT JOIN contact_phones pp ON pp.contact_id = c.id AND pp.is_primary = true
       LEFT JOIN contact_emails pe ON pe.contact_id = c.id AND pe.is_primary = true
       WHERE c.client_id = ${req.user.sub}
         AND (cp.phone_dial || cp.phone) = ${phone}
-      ORDER BY c.id, cl.created_at
+      ORDER BY c.id
     `
     if (!contacts.length) return null
     const base = contacts[0]
     const phones = await sql`SELECT * FROM contact_phones WHERE contact_id = ${base.id} ORDER BY is_primary DESC, created_at`
     const emails = await sql`SELECT * FROM contact_emails WHERE contact_id = ${base.id} ORDER BY is_primary DESC, created_at`
+    const listRows = await sql`
+      SELECT cl.id, cl.name FROM list_members lm
+      JOIN contact_lists cl ON cl.id = lm.list_id
+      WHERE lm.contact_id = ${base.id} ORDER BY cl.created_at
+    `
     return {
       id:            base.id,
       first_name:    base.first_name,
@@ -625,7 +640,7 @@ export async function contactsRoutes(fastify) {
       is_subscribed: base.is_subscribed,
       phones,
       emails,
-      lists: contacts.map(c => ({ id: c.list_id, name: c.list_name })),
+      lists: listRows.map(l => ({ id: l.id, name: l.name })),
     }
   })
 
@@ -747,13 +762,13 @@ export async function contactsRoutes(fastify) {
     return { ok: true }
   })
 
+  // Quitar un contacto de una lista = eliminar la membresía. NO borra la persona
+  // (sigue existiendo en Contactos y en sus otras listas).
   fastify.delete('/lists/:listId/contacts/:contactId', auth, async (req, reply) => {
-    const [contact] = await sql`
-      DELETE FROM contacts
-      WHERE id = ${req.params.contactId} AND list_id = ${req.params.listId} AND client_id = ${req.user.sub}
-      RETURNING id
-    `
-    if (!contact) return reply.code(404).send({ error: 'Contacto no encontrado' })
+    const [own] = await sql`SELECT id FROM contacts WHERE id = ${req.params.contactId} AND client_id = ${req.user.sub}`
+    if (!own) return reply.code(404).send({ error: 'Contacto no encontrado' })
+    await sql`DELETE FROM list_members WHERE list_id = ${req.params.listId} AND contact_id = ${req.params.contactId}`
+    await sql`UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM list_members WHERE list_id = ${req.params.listId}) WHERE id = ${req.params.listId}`
     return { deleted: true }
   })
 }
