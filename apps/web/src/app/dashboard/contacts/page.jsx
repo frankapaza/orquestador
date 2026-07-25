@@ -671,6 +671,22 @@ function ListDetail({ list, onChanged, onDeleteList }) {
 }
 
 // ─── Página principal ───────────────────────────────────────────────────────
+// Muestra el teléfono con país SEPARADO: bandera (phone_country) + código
+// (phone_dial) sutil + número nacional (phone) resaltado. Los datos ya vienen
+// separados de la BD; aquí solo se presentan bien.
+function PhoneDisplay({ p }) {
+  if (!p || !p.phone) return <span className="text-muted-foreground">—</span>
+  const country = resolveCountry({ phone_country: p.phone_country, phone: `${p.phone_dial ?? ''}${p.phone}` })
+  const dial = p.phone_dial || country?.dial || ''
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      {country && <Flag code={country.code} />}
+      {dial && <span className="text-xs text-muted-foreground">{dial}</span>}
+      <span className="font-medium text-foreground">{p.phone}</span>
+    </span>
+  )
+}
+
 // Hub GLOBAL de contactos: busca por documento / nombre / teléfono / correo,
 // sin depender de la lista. Cada fila es un contacto (identidad por documento);
 // al hacer clic se abre su ficha 360 con el historial unificado.
@@ -697,7 +713,6 @@ function GlobalContacts() {
 
   const pages = Math.max(1, Math.ceil(total / LIMIT))
   const fullName = c => [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sin nombre'
-  const phoneStr = p => p ? `${p.phone_dial ?? ''} ${p.phone}`.trim() : null
 
   return (
     <SectionCard noPadding>
@@ -731,16 +746,17 @@ function GlobalContacts() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {contacts.map(c => {
-                const ph = phoneStr(c.phone)
-                return (
+              {contacts.map(c => (
                   <tr key={c.id} className="transition-colors hover:bg-muted/40">
                     <td className="px-5 py-3">
                       <Link href={`/dashboard/contacts/${c.id}`} className="font-medium text-foreground hover:text-jungle-green-700">{fullName(c)}</Link>
                     </td>
                     <td className="px-5 py-3 tabular-nums text-muted-foreground">{c.document || '—'}</td>
-                    <td className="px-5 py-3 font-mono text-xs text-muted-foreground">
-                      {ph || '—'}{Number(c.phone_count) > 1 && <span className="ml-1 rounded bg-muted px-1 text-[10px]">+{Number(c.phone_count) - 1}</span>}
+                    <td className="px-5 py-3">
+                      <span className="inline-flex items-center gap-1">
+                        <PhoneDisplay p={c.phone} />
+                        {Number(c.phone_count) > 1 && <span className="rounded bg-muted px-1 text-[10px] text-muted-foreground">+{Number(c.phone_count) - 1}</span>}
+                      </span>
                     </td>
                     <td className="px-5 py-3 text-muted-foreground">
                       <span className="truncate">{c.email || '—'}</span>{Number(c.email_count) > 1 && <span className="ml-1 rounded bg-muted px-1 text-[10px]">+{Number(c.email_count) - 1}</span>}
@@ -760,8 +776,7 @@ function GlobalContacts() {
                       </Button>
                     </td>
                   </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>
