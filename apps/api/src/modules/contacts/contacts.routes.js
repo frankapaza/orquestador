@@ -116,6 +116,48 @@ export async function contactsRoutes(fastify) {
 
   // --- Contactos ---
 
+  // Hub GLOBAL de contactos: buscar por documento / nombre / teléfono / correo,
+  // independiente de la lista. Un contacto = una fila (identidad por documento).
+  fastify.get('/contacts', auth, async (req) => {
+    const clientId = req.user.sub
+    const q      = String(req.query.q ?? '').trim()
+    const page   = Math.max(1, parseInt(req.query.page ?? '1') || 1)
+    const limit  = Math.min(100, Math.max(1, parseInt(req.query.limit ?? '30') || 30))
+    const offset = (page - 1) * limit
+
+    const term   = `%${q}%`
+    const digits = q.replace(/\D/g, '')
+    const filter = q
+      ? sql`AND (
+          c.document ILIKE ${term}
+          OR c.first_name ILIKE ${term}
+          OR c.last_name  ILIKE ${term}
+          OR (COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')) ILIKE ${term}
+          OR EXISTS (SELECT 1 FROM contact_phones p WHERE p.contact_id = c.id
+                     AND (p.phone ILIKE ${term}
+                          ${digits.length >= 3 ? sql`OR regexp_replace(COALESCE(p.phone_dial,'') || p.phone, '\D', '', 'g') ILIKE ${'%' + digits + '%'}` : sql``}))
+          OR EXISTS (SELECT 1 FROM contact_emails e WHERE e.contact_id = c.id AND e.email ILIKE ${term})
+        )`
+      : sql``
+
+    const contacts = await sql`
+      SELECT c.id, c.document, c.first_name, c.last_name, c.created_at,
+        (SELECT json_build_object('phone', p.phone, 'phone_dial', p.phone_dial, 'phone_country', p.phone_country)
+         FROM contact_phones p WHERE p.contact_id = c.id ORDER BY p.is_primary DESC, p.created_at LIMIT 1) AS phone,
+        (SELECT e.email FROM contact_emails e WHERE e.contact_id = c.id ORDER BY e.is_primary DESC, e.created_at LIMIT 1) AS email,
+        (SELECT COUNT(*) FROM contact_phones p WHERE p.contact_id = c.id) AS phone_count,
+        (SELECT COUNT(*) FROM contact_emails e WHERE e.contact_id = c.id) AS email_count,
+        (SELECT COALESCE(json_agg(json_build_object('id', cl.id, 'name', cl.name) ORDER BY cl.created_at), '[]')
+         FROM list_members lm JOIN contact_lists cl ON cl.id = lm.list_id WHERE lm.contact_id = c.id) AS lists
+      FROM contacts c
+      WHERE c.client_id = ${clientId} ${filter}
+      ORDER BY c.created_at DESC
+      LIMIT ${limit} OFFSET ${offset}
+    `
+    const [{ count }] = await sql`SELECT COUNT(*) FROM contacts c WHERE c.client_id = ${clientId} ${filter}`
+    return { contacts, total: parseInt(count), page, limit }
+  })
+
   fastify.get('/lists/:listId/contacts', auth, async (req, reply) => {
     const { page = 1, limit = 50 } = req.query
     const offset = (page - 1) * limit

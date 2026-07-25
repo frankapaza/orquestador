@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
 import { createPortal } from 'react-dom'
+import Link from 'next/link'
 import * as XLSX from 'xlsx'
 import api from '../../../lib/api'
 import { PageHeader } from '../../../components/ui/PageHeader'
@@ -670,7 +671,117 @@ function ListDetail({ list, onChanged, onDeleteList }) {
 }
 
 // ─── Página principal ───────────────────────────────────────────────────────
+// Hub GLOBAL de contactos: busca por documento / nombre / teléfono / correo,
+// sin depender de la lista. Cada fila es un contacto (identidad por documento);
+// al hacer clic se abre su ficha 360 con el historial unificado.
+function GlobalContacts() {
+  const [contacts, setContacts] = useState([])
+  const [total, setTotal]       = useState(0)
+  const [page, setPage]         = useState(1)
+  const [q, setQ]               = useState('')
+  const [loading, setLoading]   = useState(true)
+  const LIMIT = 30
+
+  useEffect(() => { setPage(1) }, [q])
+  useEffect(() => {
+    let cancel = false
+    setLoading(true)
+    const t = setTimeout(() => {
+      api.get(`/contacts?q=${encodeURIComponent(q)}&page=${page}&limit=${LIMIT}`)
+        .then(r => { if (!cancel) { setContacts(r.data.contacts ?? []); setTotal(r.data.total ?? 0) } })
+        .catch(() => {})
+        .finally(() => { if (!cancel) setLoading(false) })
+    }, 250)
+    return () => { cancel = true; clearTimeout(t) }
+  }, [q, page])
+
+  const pages = Math.max(1, Math.ceil(total / LIMIT))
+  const fullName = c => [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sin nombre'
+  const phoneStr = p => p ? `${p.phone_dial ?? ''} ${p.phone}`.trim() : null
+
+  return (
+    <SectionCard noPadding>
+      <div className="border-b p-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Buscar por documento, nombre, teléfono o correo..."
+            className="h-11 rounded-xl border-transparent bg-muted/60 pl-9 text-sm shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0" />
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+          <Loader2 size={18} className="animate-spin text-jungle-green-600" /> Cargando...
+        </div>
+      ) : contacts.length === 0 ? (
+        <EmptyState icon={Users} title={q ? 'Sin coincidencias' : 'Sin contactos'}
+          description={q ? 'Ningún contacto coincide con tu búsqueda.' : 'Aún no tienes contactos. Se crean al importar destinatarios o agregarlos a una lista.'} />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <th className="px-5 py-3 font-medium">Contacto</th>
+                <th className="px-5 py-3 font-medium">Documento</th>
+                <th className="px-5 py-3 font-medium">Teléfono</th>
+                <th className="px-5 py-3 font-medium">Correo</th>
+                <th className="px-5 py-3 font-medium">Listas</th>
+                <th className="px-5 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {contacts.map(c => {
+                const ph = phoneStr(c.phone)
+                return (
+                  <tr key={c.id} className="transition-colors hover:bg-muted/40">
+                    <td className="px-5 py-3">
+                      <Link href={`/dashboard/contacts/${c.id}`} className="font-medium text-foreground hover:text-jungle-green-700">{fullName(c)}</Link>
+                    </td>
+                    <td className="px-5 py-3 tabular-nums text-muted-foreground">{c.document || '—'}</td>
+                    <td className="px-5 py-3 font-mono text-xs text-muted-foreground">
+                      {ph || '—'}{Number(c.phone_count) > 1 && <span className="ml-1 rounded bg-muted px-1 text-[10px]">+{Number(c.phone_count) - 1}</span>}
+                    </td>
+                    <td className="px-5 py-3 text-muted-foreground">
+                      <span className="truncate">{c.email || '—'}</span>{Number(c.email_count) > 1 && <span className="ml-1 rounded bg-muted px-1 text-[10px]">+{Number(c.email_count) - 1}</span>}
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {(c.lists ?? []).slice(0, 3).map(l => (
+                          <span key={l.id} className="rounded-full bg-jungle-green-50 px-2 py-0.5 text-[11px] text-jungle-green-700">{l.name}</span>
+                        ))}
+                        {(c.lists?.length ?? 0) > 3 && <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">+{c.lists.length - 3}</span>}
+                        {(c.lists?.length ?? 0) === 0 && <span className="text-xs text-muted-foreground">—</span>}
+                      </div>
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <Button asChild variant="ghost" size="sm" className="h-7 px-2 text-jungle-green-700 hover:text-jungle-green-800">
+                        <Link href={`/dashboard/contacts/${c.id}`}><Eye size={14} strokeWidth={1.75} /> Ver</Link>
+                      </Button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {pages > 1 && (
+        <div className="flex items-center justify-between border-t px-5 py-3 text-sm">
+          <span className="text-muted-foreground">{num(total)} contactos · página {page} de {pages}</span>
+          <div className="flex gap-1">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ArrowLeft size={14} /> Anterior</Button>
+            <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage(p => p + 1)}>Siguiente <ArrowRight size={14} /></Button>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
 export default function ContactsPage() {
+  const [view, setView]       = useState('all')  // 'all' (hub global) | 'lists' (segmentos)
   const [lists, setLists]     = useState([])
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
@@ -720,14 +831,31 @@ export default function ContactsPage() {
       <PageHeader
         icon={Users}
         title="Contactos"
-        description="Gestiona tus listas de contactos para email, WhatsApp y SMS"
-        action={
+        description="Busca cualquier cliente por documento, nombre, teléfono o correo — y gestiona tus listas."
+        action={view === 'lists' && (
           <Button onClick={() => setShowListForm(v => !v)}>
             <Plus size={16} strokeWidth={1.75} /> Nueva lista
           </Button>
-        }
+        )}
       />
 
+      {/* Tabs: hub global de contactos vs. listas (segmentos) */}
+      <div className="flex gap-1 rounded-xl bg-muted p-1 sm:w-fit">
+        {[
+          { key: 'all',   label: 'Todos los contactos', Icon: Users },
+          { key: 'lists', label: 'Listas', Icon: FolderOpen },
+        ].map(t => (
+          <button key={t.key} onClick={() => setView(t.key)}
+            className={cn('flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+              view === t.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+            <t.Icon size={15} strokeWidth={1.75} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'all' && <GlobalContacts />}
+
+      {view === 'lists' && (<>
       {/* Resumen */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <SummaryStat icon={FolderOpen} label="Listas de contactos" value={num(lists.length)} tone="green" />
@@ -806,6 +934,7 @@ export default function ContactsPage() {
           )}
         </div>
       )}
+      </>)}
     </div>
   )
 }
