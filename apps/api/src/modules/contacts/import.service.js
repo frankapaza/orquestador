@@ -7,13 +7,22 @@ import { parse as csvParse } from 'csv-parse/sync'
 export function buildContactsTemplate({ channel = 'whatsapp', vars = [] } = {}) {
   const isEmail = channel === 'email'
   const contactCol = isEmail ? 'correo' : 'telefono'
-  const contactEx  = isEmail ? 'juan@correo.com' : '+51999888777'
+  const contactEx  = isEmail ? 'juan@correo.com' : '999888777'
   // Dedup y quita columnas de identidad para no repetirlas como "variable".
-  const IDENT = new Set(['documento', 'dni', 'ruc', 'ce', 'telefono', 'celular', 'phone', 'whatsapp', 'correo', 'email', 'nombre', 'name', 'first_name', 'last_name', 'apellido'])
+  const IDENT = new Set(['documento', 'dni', 'ruc', 'ce', 'telefono', 'celular', 'phone', 'whatsapp', 'correo', 'email', 'pais', 'país', 'country', 'nombre', 'name', 'first_name', 'last_name', 'apellido'])
   const dynamicVars = [...new Set(vars.map(v => String(v).toLowerCase()).filter(v => v && !IDENT.has(v)))]
 
-  const headers = ['documento', contactCol, 'nombre', ...dynamicVars]
-  const example = ['12345678', contactEx, 'Juan Pérez', ...dynamicVars.map(() => 'ejemplo')]
+  // Canales con teléfono llevan columna 'pais' (opcional): identifica el país
+  // cuando el número viene nacional (sin '+'). Email no la necesita.
+  const identCols = isEmail
+    ? ['documento', contactCol, 'nombre']
+    : ['documento', contactCol, 'pais', 'nombre']
+  const identEx = isEmail
+    ? ['12345678', contactEx, 'Juan Pérez']
+    : ['12345678', contactEx, 'PE', 'Juan Pérez']
+
+  const headers = [...identCols, ...dynamicVars]
+  const example = [...identEx, ...dynamicVars.map(() => 'ejemplo')]
   const ws = XLSX.utils.aoa_to_sheet([headers, example])
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Contactos')
@@ -26,6 +35,7 @@ const COL_FIRST_NAME = ['first_name', 'firstname', 'nombre', 'name', 'first']
 const COL_LAST_NAME  = ['last_name', 'lastname', 'apellido', 'surname', 'last']
 const COL_PHONE = ['telefono', 'teléfono', 'phone', 'celular', 'movil', 'móvil', 'whatsapp', 'numero', 'número', 'msisdn', 'tel']
 const COL_DOCUMENT = ['documento', 'dni', 'ruc', 'ce', 'cedula', 'cédula', 'document', 'nif', 'identificacion', 'identificación', 'doc']
+const COL_COUNTRY  = ['pais', 'país', 'country', 'codigo_pais', 'código_pais', 'cod_pais', 'iso']
 
 function normalize(str) {
   return String(str ?? '').trim().toLowerCase().replace(/\s+/g, '_')
@@ -122,6 +132,7 @@ function mapRowsContacts(headers, rows, mode) {
   const phoneCol     = findCol(headers, COL_PHONE)
   const emailCol     = findCol(headers, COL_EMAIL)
   const documentCol  = findCol(headers, COL_DOCUMENT)
+  const countryCol   = findCol(headers, COL_COUNTRY)
   const firstNameCol = findCol(headers, COL_FIRST_NAME)
   const lastNameCol  = findCol(headers, COL_LAST_NAME)
 
@@ -136,8 +147,8 @@ function mapRowsContacts(headers, rows, mode) {
     throw new Error('No se encontro columna de telefono. Debe llamarse: telefono, phone, celular, movil o whatsapp')
   }
 
-  // Documento/teléfono/correo/nombre son identidad-contacto, NO variables de metadata.
-  const known = new Set([phoneCol, emailCol, documentCol, firstNameCol, lastNameCol].filter(Boolean))
+  // Documento/teléfono/correo/país/nombre son identidad-contacto, NO variables.
+  const known = new Set([phoneCol, emailCol, documentCol, countryCol, firstNameCol, lastNameCol].filter(Boolean))
   const metaCols = headers.filter(h => !known.has(h))
 
   const contacts = []
@@ -167,6 +178,14 @@ function mapRowsContacts(headers, rows, mode) {
       continue
     }
 
+    // País opcional: si el número no trae '+', esta pista define su país. Acepta
+    // ISO (PE), código de marcación (+51) o nombre lo ignora. splitPhone lo usa
+    // para guardar phone_country/phone_dial bien aunque el teléfono venga nacional.
+    const paisRaw = countryCol ? String(row[countryCol] ?? '').trim() : ''
+    let phone_country = null, phone_dial = null
+    if (paisRaw.startsWith('+')) phone_dial = paisRaw.replace(/[^\d+]/g, '')
+    else if (/^[a-zA-Z]{2}$/.test(paisRaw)) phone_country = paisRaw.toUpperCase()
+
     const metadata = {}
     for (const col of metaCols) {
       const val = row[col]
@@ -178,6 +197,8 @@ function mapRowsContacts(headers, rows, mode) {
     contacts.push({
       document,
       phone:      phoneOk ? phoneRaw : null,
+      phone_country,
+      phone_dial,
       email:      emailOk ? emailRaw : null,
       first_name: firstNameCol ? String(row[firstNameCol] ?? '').trim() || null : null,
       last_name:  lastNameCol  ? String(row[lastNameCol]  ?? '').trim() || null : null,

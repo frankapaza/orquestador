@@ -5,10 +5,10 @@ import { extractVars } from './assistant.vars.js'
 // cada variable {{...}} de Excel (en minúsculas, como las normaliza el importador).
 export function buildAssistantTemplate(assistant) {
   const vars = extractVars(assistant).map(v => v.toLowerCase())
-  // 'documento' (DNI/RUC) es obligatorio: es la identidad del contacto. El teléfono
-  // en formato internacional con '+' para identificar bien el país.
-  const headers = ['documento', 'telefono', 'nombre', ...vars]
-  const example = ['12345678', '+51999888777', 'Juan Pérez', ...vars.map(() => 'ejemplo')]
+  // 'documento' (DNI/RUC) obligatorio = identidad del contacto. 'pais' (opcional)
+  // identifica el país cuando el teléfono viene nacional (sin '+').
+  const headers = ['documento', 'telefono', 'pais', 'nombre', ...vars]
+  const example = ['12345678', '999888777', 'PE', 'Juan Pérez', ...vars.map(() => 'ejemplo')]
   const ws = XLSX.utils.aoa_to_sheet([headers, example])
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, 'Contactos')
