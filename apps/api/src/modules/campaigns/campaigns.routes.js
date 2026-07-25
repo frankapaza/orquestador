@@ -1,9 +1,9 @@
 import { z } from 'zod'
 import { sql } from '../../lib/db.js'
 import { enqueueCampaign, campaignQueue } from '../../workers/campaign.queue.js'
-import { parseFileContacts } from '../contacts/import.service.js'
+import { parseFileContacts, buildContactsTemplate } from '../contacts/import.service.js'
 import { upsertContactsByPhone } from '../contacts/phone-import.service.js'
-import { extractVars } from '../assistants/assistant.vars.js'
+import { extractVars, extractVarsFromText } from '../assistants/assistant.vars.js'
 
 const campaignBase = z.object({
   name: z.string().min(2),
@@ -50,8 +50,33 @@ const campaignSchema = campaignBase.refine(
 export async function campaignsRoutes(fastify) {
   const auth = { onRequest: [fastify.authenticate] }
 
-  // Subir Excel de destinatarios (por teléfono) → crea una lista reutilizable.
-  // Query: ?assistant_id=<uuid opcional>&name=<nombre base>
+  // Descargar la plantilla de destinatarios de una campaña, por canal. El backend
+  // decide las columnas: documento + teléfono/correo + nombre + variables dinámicas.
+  // Las variables se derivan aquí (no en el front): del asistente (IA) o del texto
+  // del mensaje/asunto que envía el cliente.
+  fastify.post('/campaigns/plantilla', auth, async (req, reply) => {
+    const body = z.object({
+      channel:      z.enum(['whatsapp', 'sms', 'email']).default('whatsapp'),
+      assistant_id: z.string().uuid().optional(),
+      content:      z.string().optional(),   // texto del mensaje/asunto/HTML (crudo)
+    }).parse(req.body ?? {})
+
+    let vars = []
+    if (body.assistant_id) {
+      const [asst] = await sql`SELECT * FROM wa_assistants WHERE id = ${body.assistant_id} AND client_id = ${req.user.sub}`
+      if (asst) vars = extractVars(asst)
+    } else if (body.content) {
+      vars = extractVarsFromText(body.content)
+    }
+
+    const buf = buildContactsTemplate({ channel: body.channel, vars })
+    reply.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    reply.header('Content-Disposition', `attachment; filename="plantilla-${body.channel}.xlsx"`)
+    return reply.send(buf)
+  })
+
+  // Subir Excel de destinatarios → crea una lista reutilizable.
+  // Query: ?channel=<canal>&assistant_id=<uuid opcional>&name=<nombre base>
   fastify.post('/campaigns/import-recipients', auth, async (req, reply) => {
     const file = await req.file()
     if (!file) return reply.code(400).send({ error: 'No se recibió archivo' })

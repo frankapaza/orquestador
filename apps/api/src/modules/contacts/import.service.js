@@ -1,6 +1,25 @@
 import * as XLSX from 'xlsx'
 import { parse as csvParse } from 'csv-parse/sync'
 
+// Genera la plantilla Excel de destinatarios de una campaña, por canal:
+// SIEMPRE documento (identidad) + teléfono (WA/SMS) o correo (Email) + nombre,
+// y luego las variables dinámicas (columnas que el mensaje/asistente usa como {{...}}).
+export function buildContactsTemplate({ channel = 'whatsapp', vars = [] } = {}) {
+  const isEmail = channel === 'email'
+  const contactCol = isEmail ? 'correo' : 'telefono'
+  const contactEx  = isEmail ? 'juan@correo.com' : '+51999888777'
+  // Dedup y quita columnas de identidad para no repetirlas como "variable".
+  const IDENT = new Set(['documento', 'dni', 'ruc', 'ce', 'telefono', 'celular', 'phone', 'whatsapp', 'correo', 'email', 'nombre', 'name', 'first_name', 'last_name', 'apellido'])
+  const dynamicVars = [...new Set(vars.map(v => String(v).toLowerCase()).filter(v => v && !IDENT.has(v)))]
+
+  const headers = ['documento', contactCol, 'nombre', ...dynamicVars]
+  const example = ['12345678', contactEx, 'Juan Pérez', ...dynamicVars.map(() => 'ejemplo')]
+  const ws = XLSX.utils.aoa_to_sheet([headers, example])
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Contactos')
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+}
+
 // Nombres de columna aceptados para cada campo (case-insensitive)
 const COL_EMAIL      = ['email', 'correo', 'e-mail', 'mail']
 const COL_FIRST_NAME = ['first_name', 'firstname', 'nombre', 'name', 'first']

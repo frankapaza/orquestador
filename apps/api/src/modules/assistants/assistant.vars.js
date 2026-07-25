@@ -5,19 +5,23 @@ export const VAR_RE = /\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g
 // Variables que NO provienen del Excel: se resuelven de los datos del contacto.
 export const AUTO_VARS = new Set(['TELEFONO', 'NOMBRE', 'NOMBRE_CLIENTE'])
 
-// Variables de Excel de un asistente: escanea greeting + system_prompt, MAYÚSCULAS,
-// quita las automáticas, dedupe conservando el orden de aparición.
-export function extractVars(assistant) {
-  const text = `${assistant?.greeting ?? ''}\n${assistant?.system_prompt ?? ''}`
+// Extrae las variables {{...}} de un texto libre (MAYÚSCULAS), quita las
+// automáticas y deduplica conservando el orden. Base para extractVars.
+export function extractVarsFromText(text) {
   const seen = new Set()
   const out = []
-  for (const m of text.matchAll(VAR_RE)) {
+  for (const m of String(text ?? '').matchAll(VAR_RE)) {
     const key = m[1].toUpperCase()
     if (AUTO_VARS.has(key) || seen.has(key)) continue
     seen.add(key)
     out.push(key)
   }
   return out
+}
+
+// Variables de Excel de un asistente: escanea greeting + system_prompt.
+export function extractVars(assistant) {
+  return extractVarsFromText(`${assistant?.greeting ?? ''}\n${assistant?.system_prompt ?? ''}`)
 }
 
 // Reemplaza {{VAR}} por ctx[VAR] (MAYÚSCULAS). Variable sin valor → cadena vacía.

@@ -178,6 +178,33 @@ function NewCampaignForm() {
     } finally { setTemplateLoading(false) }
   }
 
+  // Plantilla de destinatarios por canal. El front solo manda el canal y el texto
+  // crudo del mensaje/asunto; el BACKEND decide las columnas y extrae las variables.
+  async function downloadRecipientTemplate() {
+    if (templateLoading) return
+    setTemplateLoading(true)
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('kubo_token') : null
+      const base  = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1'
+      const content = [form.subject, form.html_content, form.text_content, form.content_text].filter(Boolean).join('\n')
+      const res = await fetch(`${base}/campaigns/plantilla`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ channel: form.channel, content }),
+      })
+      if (!res.ok) throw new Error('download failed')
+      const blob = await res.blob()
+      const url  = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `plantilla-${form.channel}.xlsx`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('No se pudo descargar la plantilla')
+    } finally { setTemplateLoading(false) }
+  }
+
   async function uploadRecipients(file) {
     if (!file) return
     // Limpia el error anterior: si el archivo previo falló (ej. faltaba documento),
@@ -398,6 +425,12 @@ function NewCampaignForm() {
                         </>
                       ) : (
                         <>
+                          <div className="mb-1.5 flex items-center justify-between gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+                            <span className="text-xs text-muted-foreground">¿No tienes el formato? Descarga la plantilla de este canal.</span>
+                            <Button type="button" variant="outline" size="sm" onClick={downloadRecipientTemplate} disabled={templateLoading}>
+                              {templateLoading ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} strokeWidth={1.75} />} Descargar plantilla
+                            </Button>
+                          </div>
                           <input id="recipients_file_manual" type="file" accept=".xlsx,.xls,.csv" disabled={importing}
                             onChange={e => uploadRecipients(e.target.files?.[0])}
                             className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-jungle-green-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-jungle-green-700" />
