@@ -180,7 +180,9 @@ function NewCampaignForm() {
 
   async function uploadRecipients(file) {
     if (!file) return
-    setImporting(true); setImportInfo(null)
+    // Limpia el error anterior: si el archivo previo falló (ej. faltaba documento),
+    // al subir uno nuevo no debe quedar el mensaje viejo colgado.
+    setImporting(true); setImportInfo(null); setError('')
     try {
       const fd = new FormData(); fd.append('file', file)
       const q = `?assistant_id=${assistantId}&name=${encodeURIComponent(form.name || 'Campaña')}`
