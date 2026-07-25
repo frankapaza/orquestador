@@ -7,20 +7,21 @@ import { splitPhone } from '../../lib/phone.js'
 // teléfonos/correos nuevos. Fallback: si una fila no trae documento (llamadas
 // internas), deduplica por teléfono a nivel cliente.
 export async function upsertContactsByPhone(clientId, listId, rows) {
-  // Dedup dentro del propio lote: por documento si existe, si no por teléfono.
+  // Dedup dentro del propio lote: por documento; si no, por teléfono; si no, por correo.
   const map = new Map()
   for (const r of rows) {
     const sp = splitPhone(r.phone, { country: r.phone_country, dial: r.phone_dial })
-    if (!sp.national) continue
-    const full = `${sp.dial ?? ''}${sp.national}`
-    const key = r.document ? `doc:${r.document}` : `tel:${full}`
-    map.set(key, { ...r, sp, full }) // la última fila de la misma persona gana
+    const full = sp.national ? `${sp.dial ?? ''}${sp.national}` : null
+    const email = r.email ? String(r.email).trim().toLowerCase() : null
+    if (!full && !email) continue // sin teléfono ni correo no hay a quién escribir
+    const key = r.document ? `doc:${r.document}` : (full ? `tel:${full}` : `email:${email}`)
+    map.set(key, { ...r, sp, full, email }) // la última fila de la misma persona gana
   }
   const deduped = [...map.values()]
   if (!deduped.length) return 0
 
   for (const r of deduped) {
-    // Buscar el contacto existente: primero por documento; si no, por teléfono.
+    // Buscar el contacto existente: documento → teléfono → correo.
     let contactId = null
     if (r.document) {
       const [c] = await sql`
@@ -28,12 +29,21 @@ export async function upsertContactsByPhone(clientId, listId, rows) {
       `
       contactId = c?.id ?? null
     }
-    if (!contactId) {
+    if (!contactId && r.full) {
       const [c] = await sql`
         SELECT cp.contact_id AS id FROM contact_phones cp
         JOIN contacts co ON co.id = cp.contact_id
         WHERE co.client_id = ${clientId}
           AND (COALESCE(cp.phone_dial,'') || cp.phone) = ${r.full}
+        LIMIT 1
+      `
+      contactId = c?.id ?? null
+    }
+    if (!contactId && r.email) {
+      const [c] = await sql`
+        SELECT ce.contact_id AS id FROM contact_emails ce
+        JOIN contacts co ON co.id = ce.contact_id
+        WHERE co.client_id = ${clientId} AND ce.email = ${r.email}
         LIMIT 1
       `
       contactId = c?.id ?? null
@@ -58,13 +68,15 @@ export async function upsertContactsByPhone(clientId, listId, rows) {
       contactId = contact.id
     }
 
-    // Suma el teléfono (si es nuevo para el contacto). El primero queda principal.
-    await sql`
-      INSERT INTO contact_phones (contact_id, client_id, phone, phone_dial, phone_country, label, is_primary)
-      VALUES (${contactId}, ${clientId}, ${r.sp.national}, ${r.sp.dial || null}, ${r.sp.country || null}, 'Móvil',
-              NOT EXISTS (SELECT 1 FROM contact_phones WHERE contact_id = ${contactId}))
-      ON CONFLICT (contact_id, phone) DO NOTHING
-    `
+    // Suma el teléfono (si viene y es nuevo). El primero queda principal.
+    if (r.sp.national) {
+      await sql`
+        INSERT INTO contact_phones (contact_id, client_id, phone, phone_dial, phone_country, label, is_primary)
+        VALUES (${contactId}, ${clientId}, ${r.sp.national}, ${r.sp.dial || null}, ${r.sp.country || null}, 'Móvil',
+                NOT EXISTS (SELECT 1 FROM contact_phones WHERE contact_id = ${contactId}))
+        ON CONFLICT (contact_id, phone) DO NOTHING
+      `
+    }
     if (r.email) {
       await sql`
         INSERT INTO contact_emails (contact_id, client_id, email, label, is_primary)

@@ -95,25 +95,30 @@ export function parseFile(buffer, filename) {
   throw new Error(`Formato no soportado: .${ext}. Use .csv, .xlsx o .xls`)
 }
 
-// ── Variante indexada por TELÉFONO (para campañas WhatsApp/SMS) ─────────────
-// Igual que mapRows pero la clave obligatoria es el teléfono; el email es opcional.
-function mapRowsByPhone(headers, rows) {
+// ── Import de destinatarios de CAMPAÑA (WhatsApp / SMS / Email) ─────────────
+// Identidad SIEMPRE por documento (obligatorio). Según el canal, exige teléfono
+// (mensajería) o correo (email); el otro dato es opcional si viene. Un contacto
+// puede traer teléfono y/o correo.
+function mapRowsContacts(headers, rows, mode) {
   const phoneCol     = findCol(headers, COL_PHONE)
+  const emailCol     = findCol(headers, COL_EMAIL)
   const documentCol  = findCol(headers, COL_DOCUMENT)
   const firstNameCol = findCol(headers, COL_FIRST_NAME)
   const lastNameCol  = findCol(headers, COL_LAST_NAME)
-  const emailCol     = findCol(headers, COL_EMAIL)
 
-  if (!phoneCol) {
-    throw new Error('No se encontro columna de telefono. Debe llamarse: telefono, phone, celular, movil o whatsapp')
-  }
-  // El documento (DNI/RUC) es la identidad del contacto: obligatorio.
+  // El documento (DNI/RUC) es la identidad del contacto: obligatorio siempre.
   if (!documentCol) {
     throw new Error('Falta la columna de documento. Debe llamarse: documento, dni, ruc o ce')
   }
+  if (mode === 'email' && !emailCol) {
+    throw new Error('No se encontro columna de email. Debe llamarse: email, correo, e-mail o mail')
+  }
+  if (mode !== 'email' && !phoneCol) {
+    throw new Error('No se encontro columna de telefono. Debe llamarse: telefono, phone, celular, movil o whatsapp')
+  }
 
-  // El documento es identidad, no una variable → NO va como columna de metadata.
-  const known = new Set([phoneCol, documentCol, firstNameCol, lastNameCol, emailCol].filter(Boolean))
+  // Documento/teléfono/correo/nombre son identidad-contacto, NO variables de metadata.
+  const known = new Set([phoneCol, emailCol, documentCol, firstNameCol, lastNameCol].filter(Boolean))
   const metaCols = headers.filter(h => !known.has(h))
 
   const contacts = []
@@ -126,9 +131,19 @@ function mapRowsByPhone(headers, rows) {
       skipped.push({ row: i + 2, value: '(sin documento)', reason: 'documento vacio' })
       continue
     }
-    const phoneRaw = String(row[phoneCol] ?? '').trim()
-    const digits = phoneRaw.replace(/\D/g, '')
-    if (!digits || digits.length < 6) {
+
+    const phoneRaw   = phoneCol ? String(row[phoneCol] ?? '').trim() : ''
+    const phoneDigits = phoneRaw.replace(/\D/g, '')
+    const phoneOk    = phoneDigits.length >= 6
+
+    const emailRaw   = emailCol ? String(row[emailCol] ?? '').trim().toLowerCase() : ''
+    const emailOk    = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)
+
+    if (mode === 'email' && !emailOk) {
+      skipped.push({ row: i + 2, value: emailRaw || '(vacio)', reason: 'email invalido' })
+      continue
+    }
+    if (mode !== 'email' && !phoneOk) {
       skipped.push({ row: i + 2, value: phoneRaw || '(vacio)', reason: 'telefono invalido' })
       continue
     }
@@ -141,12 +156,10 @@ function mapRowsByPhone(headers, rows) {
       }
     }
 
-    const email = emailCol ? String(row[emailCol] ?? '').trim().toLowerCase() : ''
-
     contacts.push({
       document,
-      phone:      phoneRaw,
-      email:      email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null,
+      phone:      phoneOk ? phoneRaw : null,
+      email:      emailOk ? emailRaw : null,
       first_name: firstNameCol ? String(row[firstNameCol] ?? '').trim() || null : null,
       last_name:  lastNameCol  ? String(row[lastNameCol]  ?? '').trim() || null : null,
       metadata,
@@ -156,7 +169,8 @@ function mapRowsByPhone(headers, rows) {
   return { contacts, skipped, total: rows.length, valid: contacts.length, columns: metaCols.map(normalize) }
 }
 
-export function parseFilePhone(buffer, filename) {
+// mode: 'email' (exige correo) | 'phone' (exige teléfono; default para WA/SMS).
+export function parseFileContacts(buffer, filename, mode = 'phone') {
   const ext = filename.split('.').pop().toLowerCase()
   let rows, headers
   if (ext === 'csv') {
@@ -174,5 +188,5 @@ export function parseFilePhone(buffer, filename) {
   } else {
     throw new Error(`Formato no soportado: .${ext}. Use .csv, .xlsx o .xls`)
   }
-  return mapRowsByPhone(headers, rows)
+  return mapRowsContacts(headers, rows, mode)
 }

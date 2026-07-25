@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { sql } from '../../lib/db.js'
 import { enqueueCampaign, campaignQueue } from '../../workers/campaign.queue.js'
-import { parseFilePhone } from '../contacts/import.service.js'
+import { parseFileContacts } from '../contacts/import.service.js'
 import { upsertContactsByPhone } from '../contacts/phone-import.service.js'
 import { extractVars } from '../assistants/assistant.vars.js'
 
@@ -68,9 +68,12 @@ export async function campaignsRoutes(fastify) {
     if (buffer.length === 0) return reply.code(400).send({ error: 'El archivo está vacío' })
     if (buffer.length > 10 * 1024 * 1024) return reply.code(400).send({ error: 'El archivo supera el límite de 10MB' })
 
+    // El canal define qué exige el archivo: email → correo, WA/SMS → teléfono.
+    // El documento (identidad) es obligatorio en ambos.
+    const mode = req.query.channel === 'email' ? 'email' : 'phone'
     let parsed
     try {
-      parsed = parseFilePhone(buffer, filename)
+      parsed = parseFileContacts(buffer, filename, mode)
     } catch (err) {
       return reply.code(422).send({ error: err.message })
     }
