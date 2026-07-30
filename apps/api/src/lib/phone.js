@@ -65,12 +65,19 @@ export function splitPhone(raw, { country, dial } = {}) {
     return { country: country ?? null, dial: dial ?? null, national: s.replace(/\D/g, '') }
   }
 
-  // Ya viene como número nacional
-  return {
-    country: country ?? null,
-    dial: dial ?? (country ? DIAL_BY_ISO[country] ?? null : null),
-    national: s.replace(/\D/g, ''),
+  // Ya viene como número nacional (o con el código pegado SIN '+', ej "51936109504").
+  const resolvedDial = dial ?? (country ? DIAL_BY_ISO[country] ?? null : null)
+  let national = s.replace(/\D/g, '')
+  // Si hay país/código conocido y el número trae ese código pegado adelante, se le
+  // quita — evita el "doble código" (ej. 51 + 51936109504). Solo si al quitarlo
+  // queda un nacional plausible (>= 6 dígitos), para no cortar números legítimos.
+  if (resolvedDial) {
+    const dd = resolvedDial.replace(/\D/g, '')
+    if (dd && national.startsWith(dd) && national.length - dd.length >= 6) {
+      national = national.slice(dd.length)
+    }
   }
+  return { country: country ?? null, dial: resolvedDial, national }
 }
 
 // Concatena el número completo E.164 a partir de las columnas separadas.
