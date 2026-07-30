@@ -435,10 +435,16 @@ function NewCampaignForm() {
                             onChange={e => uploadRecipients(e.target.files?.[0])}
                             className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-jungle-green-600 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-jungle-green-700" />
                           <p className="text-xs text-muted-foreground">
-                            Excel/CSV con columna <b>documento</b> (obligatoria) y {isEmail ? <>una de <b>correo</b> (email, correo…)</> : <>una de <b>teléfono</b> (telefono, celular, phone…), y opcional <b>pais</b> (PE, MX…) si el número no trae el <b>+</b> del código</>}. Se creará una lista automáticamente.
+                            Excel/CSV con columna <b>documento</b> (obligatoria) y {isEmail ? <>una de <b>correo</b> (email, correo…)</> : <>una de <b>teléfono</b> (número nacional) más la columna <b>pais</b> con el código (<b>+51</b>, PE…)</>}. Se creará una lista automáticamente.
                           </p>
                           {importing && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Loader2 size={13} className="animate-spin" /> Subiendo y procesando...</p>}
                           {importInfo && <p className="flex items-center gap-1.5 text-xs text-foreground"><CheckCircle size={14} className="text-jungle-green-600" /> {importInfo.total} destinatarios cargados ({importInfo.list_name}).</p>}
+                          {importInfo?.skipped > 0 && (
+                            <p className="flex items-start gap-1.5 text-xs text-amber-600">
+                              <AlertTriangle size={13} strokeWidth={1.75} className="mt-0.5 shrink-0" />
+                              {importInfo.skipped} fila{importInfo.skipped !== 1 ? 's' : ''} omitida{importInfo.skipped !== 1 ? 's' : ''} (documento, teléfono/correo o país inválido). Revisa esas filas y vuelve a subir.
+                            </p>
+                          )}
                         </>
                       )}
                     </div>
@@ -588,6 +594,12 @@ function NewCampaignForm() {
                       {importInfo && (
                         <div className="rounded-xl border bg-muted/30 p-3 text-sm">
                           <p className="flex items-center gap-1.5 text-foreground"><CheckCircle size={15} className="text-jungle-green-600" /> {importInfo.total} destinatarios cargados ({importInfo.list_name}).</p>
+                          {importInfo.skipped > 0 && (
+                            <p className="mt-1 flex items-start gap-1.5 text-amber-600">
+                              <AlertTriangle size={14} strokeWidth={1.75} className="mt-0.5 shrink-0" />
+                              {importInfo.skipped} fila{importInfo.skipped !== 1 ? 's' : ''} omitida{importInfo.skipped !== 1 ? 's' : ''} (documento, teléfono o país inválido).
+                            </p>
+                          )}
                           {importInfo.variables_faltantes?.length > 0 && (
                             <p className="mt-1 flex items-start gap-1.5 text-amber-600">
                               <AlertTriangle size={14} strokeWidth={1.75} className="mt-0.5 shrink-0" />

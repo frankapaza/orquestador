@@ -19,6 +19,35 @@ const DIALS = [
 const DIAL_BY_ISO = Object.fromEntries(DIALS)
 const SORTED = DIALS.map(([iso, dial]) => ({ iso, dial })).sort((a, b) => b.dial.length - a.dial.length)
 
+// ISO válidos y mapa código→países (para validar la columna 'pais' del Excel).
+export const ISO_CODES = new Set(DIALS.map(([iso]) => iso))
+const ISO_BY_DIAL = {}
+for (const [iso, dial] of DIALS) (ISO_BY_DIAL[dial] ??= []).push(iso)
+// Un código único (ej. +51) mapea a un país; los compartidos (+1) quedan sin país.
+function countryFromDial(dial) {
+  const arr = ISO_BY_DIAL[dial]
+  return arr && arr.length === 1 ? arr[0] : null
+}
+
+// Normaliza la pista de país de una celda: acepta ISO ('PE'), código ('+51' o '51')
+// o vacío. Devuelve { phone_country, phone_dial, valid }. `valid=false` si el
+// código NO existe (para poder avisar en la carga del Excel).
+export function normalizeCountryHint(raw) {
+  const s = String(raw ?? '').trim()
+  if (!s) return { phone_country: null, phone_dial: null, valid: true } // vacío = opcional
+  if (s.startsWith('+') || /^\d{1,4}$/.test(s)) {
+    const dial = '+' + s.replace(/\D/g, '')
+    if (!ISO_BY_DIAL[dial]) return { phone_country: null, phone_dial: null, valid: false }
+    return { phone_country: countryFromDial(dial), phone_dial: dial, valid: true }
+  }
+  if (/^[a-zA-Z]{2}$/.test(s)) {
+    const iso = s.toUpperCase()
+    if (!ISO_CODES.has(iso)) return { phone_country: null, phone_dial: null, valid: false }
+    return { phone_country: iso, phone_dial: DIAL_BY_ISO[iso] ?? null, valid: true }
+  }
+  return { phone_country: null, phone_dial: null, valid: false }
+}
+
 // Separa una entrada en { country (ISO), dial (+51), national (986095857) }.
 // Acepta un número completo (+51986095857) o ya separado (national + isoHint/dialHint).
 export function splitPhone(raw, { country, dial } = {}) {

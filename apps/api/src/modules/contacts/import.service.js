@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import { parse as csvParse } from 'csv-parse/sync'
+import { normalizeCountryHint } from '../../lib/phone.js'
 
 // Genera la plantilla Excel de destinatarios de una campaña, por canal:
 // SIEMPRE documento (identidad) + teléfono (WA/SMS) o correo (Email) + nombre,
@@ -19,7 +20,7 @@ export function buildContactsTemplate({ channel = 'whatsapp', vars = [] } = {}) 
     : ['documento', contactCol, 'pais', 'nombre']
   const identEx = isEmail
     ? ['12345678', contactEx, 'Juan Pérez']
-    : ['12345678', contactEx, 'PE', 'Juan Pérez']
+    : ['12345678', contactEx, '+51', 'Juan Pérez']
 
   const headers = [...identCols, ...dynamicVars]
   const example = [...identEx, ...dynamicVars.map(() => 'ejemplo')]
@@ -178,13 +179,16 @@ function mapRowsContacts(headers, rows, mode) {
       continue
     }
 
-    // País opcional: si el número no trae '+', esta pista define su país. Acepta
-    // ISO (PE), código de marcación (+51) o nombre lo ignora. splitPhone lo usa
-    // para guardar phone_country/phone_dial bien aunque el teléfono venga nacional.
+    // País (columna 'pais', opcional): acepta ISO (PE) o código (+51 / 51). Si el
+    // valor NO es un país/código válido, se rechaza la fila y se reporta.
     const paisRaw = countryCol ? String(row[countryCol] ?? '').trim() : ''
-    let phone_country = null, phone_dial = null
-    if (paisRaw.startsWith('+')) phone_dial = paisRaw.replace(/[^\d+]/g, '')
-    else if (/^[a-zA-Z]{2}$/.test(paisRaw)) phone_country = paisRaw.toUpperCase()
+    const ch = normalizeCountryHint(paisRaw)
+    if (paisRaw && !ch.valid) {
+      skipped.push({ row: i + 2, value: paisRaw, reason: `país no reconocido: "${paisRaw}"` })
+      continue
+    }
+    const phone_country = ch.phone_country
+    const phone_dial    = ch.phone_dial
 
     const metadata = {}
     for (const col of metaCols) {

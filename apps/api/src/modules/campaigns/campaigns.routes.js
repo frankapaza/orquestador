@@ -134,7 +134,11 @@ export async function campaignsRoutes(fastify) {
       }
     }
 
-    return { list_id: list.id, list_name: list.name, total: imported, columns: parsed.columns, variables_faltantes }
+    return {
+      list_id: list.id, list_name: list.name, total: imported, columns: parsed.columns, variables_faltantes,
+      skipped: parsed.skipped.length,
+      skipped_detail: parsed.skipped.slice(0, 15),
+    }
   })
 
   // Genera una campaña SMS de seguimiento para los no-entregados de una campaña
