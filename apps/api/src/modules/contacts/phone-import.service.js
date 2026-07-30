@@ -7,15 +7,18 @@ import { splitPhone } from '../../lib/phone.js'
 // teléfonos/correos nuevos. Fallback: si una fila no trae documento (llamadas
 // internas), deduplica por teléfono a nivel cliente.
 export async function upsertContactsByPhone(clientId, listId, rows) {
-  // Dedup dentro del propio lote: por documento; si no, por teléfono; si no, por correo.
+  // Dedup dentro del lote SOLO de filas idénticas (mismo documento + mismo teléfono
+  // + mismo correo). Un mismo documento con teléfonos distintos son filas DISTINTAS
+  // → se conservan todos sus números (no se pierde ninguno). El upsert luego los
+  // suma al mismo contacto (por documento).
   const map = new Map()
   for (const r of rows) {
     const sp = splitPhone(r.phone, { country: r.phone_country, dial: r.phone_dial })
     const full = sp.national ? `${sp.dial ?? ''}${sp.national}` : null
     const email = r.email ? String(r.email).trim().toLowerCase() : null
     if (!full && !email) continue // sin teléfono ni correo no hay a quién escribir
-    const key = r.document ? `doc:${r.document}` : (full ? `tel:${full}` : `email:${email}`)
-    map.set(key, { ...r, sp, full, email }) // la última fila de la misma persona gana
+    const key = `${r.document ?? ''}|${full ?? ''}|${email ?? ''}`
+    map.set(key, { ...r, sp, full, email })
   }
   const deduped = [...map.values()]
   if (!deduped.length) return 0
