@@ -14,13 +14,14 @@ export function buildContactsTemplate({ channel = 'whatsapp', vars = [] } = {}) 
   const dynamicVars = [...new Set(vars.map(v => String(v).toLowerCase()).filter(v => v && !IDENT.has(v)))]
 
   // Canales con teléfono llevan columna 'pais' (opcional): identifica el país
-  // cuando el número viene nacional (sin '+'). Email no la necesita.
+  // cuando el número viene nacional (sin '+'). Email no la necesita. Nombre y
+  // apellido separados, igual que el formulario manual.
   const identCols = isEmail
-    ? ['documento', contactCol, 'nombre']
-    : ['documento', contactCol, 'pais', 'nombre']
+    ? ['documento', contactCol, 'nombre', 'apellido']
+    : ['documento', contactCol, 'pais', 'nombre', 'apellido']
   const identEx = isEmail
-    ? ['12345678', contactEx, 'Juan Pérez']
-    : ['12345678', contactEx, '+51', 'Juan Pérez']
+    ? ['12345678', contactEx, 'Juan', 'Pérez']
+    : ['12345678', contactEx, '+51', 'Juan', 'Pérez']
 
   const headers = [...identCols, ...dynamicVars]
   const example = [...identEx, ...dynamicVars.map(() => 'ejemplo')]
