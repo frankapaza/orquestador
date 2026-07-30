@@ -96,6 +96,8 @@ export default function CampaignsPage() {
           failed_count:     d.failed_count,
           total_recipients: d.total_recipients || c.total_recipients,
           status:           d.status ?? c.status,
+          total_contacts:   d.total_contacts ?? c.total_contacts,
+          done_contacts:    d.done_contacts ?? c.done_contacts,
         } : c))
       } catch { /* no-op */ }
     })
@@ -170,8 +172,12 @@ export default function CampaignsPage() {
               </thead>
               <tbody className="divide-y">
                 {campaigns.map(c => {
-                  const sent = Number(c.sent_count), total = Number(c.total_recipients)
-                  const pct = total > 0 ? Math.min(100, (sent / total) * 100) : 0
+                  const sent = Number(c.sent_count), failed = Number(c.failed_count || 0), total = Number(c.total_recipients)
+                  const done = sent + failed
+                  const destPct = total > 0 ? Math.min(100, (done / total) * 100) : 0
+                  const tc = Number(c.total_contacts || 0), dc = Number(c.done_contacts || 0)
+                  const contactPct = tc > 0 ? Math.min(100, (dc / tc) * 100) : 0
+                  const sending = c.status === 'sending'
                   const openRate = sent > 0 ? ((Number(c.open_count) / sent) * 100).toFixed(1) : '0.0'
                   return (
                     <tr key={c.id} className="transition-colors hover:bg-muted/40">
@@ -191,24 +197,31 @@ export default function CampaignsPage() {
                         </span>
                       </td>
                       <td className="px-5 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-24 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className={cn('h-full rounded-full transition-all duration-700 ease-out',
-                                c.status === 'failed' ? 'bg-red-400' : c.status === 'sending' ? 'bg-blue-500' : 'bg-jungle-green-500')}
-                              style={{ width: `${pct}%` }}
-                            />
+                        <div className="min-w-[160px] space-y-1.5">
+                          {/* Contactos: el cliente cuenta solo cuando TODOS sus destinos se enviaron */}
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Contactos</span>
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div className="h-full rounded-full bg-jungle-green-500 transition-all duration-700 ease-out" style={{ width: `${contactPct}%` }} />
+                            </div>
+                            <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{dc}/{tc}</span>
                           </div>
-                          <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{sent.toLocaleString()}/{total.toLocaleString()}</span>
-                          {c.status === 'sending' && (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-600">
-                              <span className="relative flex h-1.5 w-1.5">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-75" />
-                                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-blue-500" />
-                              </span>
-                              {Math.round(pct)}%
+                          {/* Destinos: teléfonos o correos */}
+                          <div className="flex items-center gap-2">
+                            <span className="w-16 shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{c.channel === 'email' ? 'Correos' : 'Teléfonos'}</span>
+                            <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                              <div className={cn('h-full rounded-full transition-all duration-700 ease-out', c.status === 'failed' ? 'bg-red-400' : sending ? 'bg-blue-500' : 'bg-jungle-green-500')} style={{ width: `${destPct}%` }} />
+                            </div>
+                            <span className="flex w-9 shrink-0 items-center justify-end gap-1 text-right text-xs tabular-nums text-muted-foreground">
+                              {sending && (
+                                <span className="relative flex h-1.5 w-1.5">
+                                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-75" />
+                                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                </span>
+                              )}
+                              {done}/{total}
                             </span>
-                          )}
+                          </div>
                         </div>
                       </td>
                       <td className="px-5 py-3 text-right tabular-nums">

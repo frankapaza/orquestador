@@ -14,10 +14,21 @@ const QUEUE_NAME = 'campaign-jobs'
 async function emitCampaignProgress(campaignId) {
   try {
     const [c] = await sql`
-      SELECT client_id, sent_count, failed_count, total_recipients, status
+      SELECT client_id, list_id, sent_count, failed_count, total_recipients, status
       FROM campaigns WHERE id = ${campaignId}
     `
     if (!c) return
+    // Progreso por CONTACTOS: total = contactos de la lista; hechos = contactos sin
+    // jobs pendientes (todos sus teléfonos/correos ya procesados).
+    const [ct] = await sql`
+      SELECT
+        (SELECT COUNT(*) FROM list_members lm WHERE lm.list_id = ${c.list_id})::int AS total_contacts,
+        COALESCE((SELECT COUNT(*) FROM (
+          SELECT cj.contact_id FROM campaign_jobs cj
+          WHERE cj.campaign_id = ${campaignId}
+          GROUP BY cj.contact_id HAVING COUNT(*) FILTER (WHERE cj.status = 'pending') = 0
+        ) t), 0)::int AS done_contacts
+    `
     bus.emit(c.client_id, {
       type:             'campaign:progress',
       campaign_id:      campaignId,
@@ -25,6 +36,8 @@ async function emitCampaignProgress(campaignId) {
       failed_count:     Number(c.failed_count),
       total_recipients: Number(c.total_recipients),
       status:           c.status,
+      total_contacts:   ct?.total_contacts ?? 0,
+      done_contacts:    ct?.done_contacts ?? 0,
     })
   } catch { /* no-op */ }
 }

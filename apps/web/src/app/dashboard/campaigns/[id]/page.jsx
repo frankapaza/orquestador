@@ -27,6 +27,51 @@ const JOB_COLOR = {
   invalid: 'bg-orange-100 text-orange-700',
 }
 
+// Tarjeta de progreso. Para "teléfonos" se pasa sent/failed y la barra se segmenta
+// (verde enviados + rojo fallidos); para "contactos" solo done/total (una barra).
+function ProgressCard({ icon: Icon, title, subtitle, done, total, sent, failed, live }) {
+  const pct       = total > 0 ? Math.round((done / total) * 100) : 0
+  const sentPct   = total > 0 ? ((sent ?? done) / total) * 100 : 0
+  const failedPct = total > 0 && failed ? (failed / total) * 100 : 0
+  const segmented = sent != null
+  return (
+    <div className="rounded-2xl border bg-card p-5 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-jungle-green-50 text-jungle-green-600"><Icon size={18} strokeWidth={1.75} /></span>
+          <div>
+            <div className="flex items-center gap-1.5">
+              <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+              {live && (
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-500 opacity-75" />
+                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-blue-500" />
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{subtitle}</p>
+          </div>
+        </div>
+        <span className="shrink-0 text-3xl font-bold tabular-nums text-foreground">{pct}%</span>
+      </div>
+      <div className="mt-4 flex h-2.5 overflow-hidden rounded-full bg-muted">
+        {segmented ? (
+          <>
+            <div className="h-full bg-jungle-green-500 transition-all duration-500 ease-out" style={{ width: `${sentPct}%` }} />
+            <div className="h-full bg-red-400 transition-all duration-500 ease-out" style={{ width: `${failedPct}%` }} />
+          </>
+        ) : (
+          <div className="h-full bg-jungle-green-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
+        )}
+      </div>
+      <div className="mt-2 flex items-center justify-between text-xs">
+        <span className="tabular-nums font-medium text-foreground">{Number(done).toLocaleString()} / {Number(total).toLocaleString()}</span>
+        {segmented && failed > 0 && <span className="font-medium text-red-600">{failed} fallidos</span>}
+      </div>
+    </div>
+  )
+}
+
 export default function CampaignDetailPage() {
   const { id } = useParams()
   const router = useRouter()
@@ -57,12 +102,37 @@ export default function CampaignDetailPage() {
     Promise.all([loadCampaign(), loadJobs()]).finally(() => setLoading(false))
   }, [loadCampaign, loadJobs])
 
-  // Auto-refresh cuando está enviando
+  // Progreso en tiempo real por SSE (el servidor empuja; mismo stream del Inbox).
+  useEffect(() => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('kubo_token') : null
+    if (!token) return
+    const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api/v1').replace(/\/$/, '')
+    const es = new EventSource(`${base}/events?token=${encodeURIComponent(token)}`)
+    es.addEventListener('campaign:progress', (e) => {
+      try {
+        const d = JSON.parse(e.data)
+        if (d.campaign_id !== id) return
+        setCampaign(prev => prev ? {
+          ...prev,
+          sent_count:       d.sent_count,
+          failed_count:     d.failed_count,
+          total_recipients: d.total_recipients || prev.total_recipients,
+          status:           d.status ?? prev.status,
+          total_contacts:   d.total_contacts ?? prev.total_contacts,
+          done_contacts:    d.done_contacts ?? prev.done_contacts,
+        } : prev)
+      } catch { /* no-op */ }
+    })
+    return () => es.close()
+  }, [id])
+
+  // La tabla de destinatarios se refresca cada 5s mientras envía (el progreso ya
+  // va en vivo por SSE arriba).
   useEffect(() => {
     if (campaign?.status !== 'sending') return
-    const interval = setInterval(() => { loadCampaign(); loadJobs() }, 5000)
+    const interval = setInterval(() => { loadJobs() }, 5000)
     return () => clearInterval(interval)
-  }, [campaign?.status, loadCampaign, loadJobs])
+  }, [campaign?.status, loadJobs])
 
   async function handleAction(action) {
     setActionLoading(true)
@@ -113,7 +183,10 @@ export default function CampaignDetailPage() {
   const total_r = Number(campaign.total_recipients)
   const pending = total_r - sent - failed
   const openRate = sent > 0 ? ((Number(campaign.open_count) / sent) * 100).toFixed(1) + '%' : '-'
-  const progress = total_r > 0 ? Math.round(((sent + failed) / total_r) * 100) : 0
+  const totalContacts = Number(campaign.total_contacts ?? 0)
+  const doneContacts  = Number(campaign.done_contacts ?? 0)
+  const live = campaign.status === 'sending'
+  const destLabel = campaign.channel === 'email' ? 'Correos' : 'Teléfonos'
 
   const FILTERS = [
     { value: '', label: 'Todos' },
@@ -226,33 +299,30 @@ export default function CampaignDetailPage() {
         </div>
       </SectionCard>
 
-      {/* Métricas */}
+      {/* Progreso — dos métricas: por CONTACTOS y por DESTINOS (teléfonos/correos) */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <ProgressCard
+          icon={Users}
+          title="Contactos"
+          subtitle="Un contacto se completa cuando TODOS sus destinos fueron enviados"
+          done={doneContacts} total={totalContacts} live={live}
+        />
+        <ProgressCard
+          icon={Send}
+          title={`${destLabel} (destinos)`}
+          subtitle={`Cada ${campaign.channel === 'email' ? 'correo' : 'teléfono'} del contacto es un envío`}
+          done={sent + failed} total={total_r} sent={sent} failed={failed} live={live}
+        />
+      </div>
+
+      {/* Resumen de métricas */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
-        <StatCard icon={Users} label="Total destinatarios" value={total_r.toLocaleString()} tone="slate" />
+        <StatCard icon={Users} label="Contactos" value={`${doneContacts}/${totalContacts}`} tone="slate" />
+        <StatCard icon={Send} label={`${destLabel} enviados`} value={`${sent + failed}/${total_r}`} tone="blue" />
         <StatCard icon={CheckCircle} label="Enviados" value={sent.toLocaleString()} tone="green" />
         <StatCard icon={XCircle} label="Fallidos" value={failed.toLocaleString()} tone={failed > 0 ? 'rose' : 'slate'} />
         <StatCard icon={Clock} label="Pendientes" value={Math.max(0, pending).toLocaleString()} tone={pending > 0 ? 'blue' : 'slate'} />
-        <StatCard icon={Eye} label="Tasa apertura" value={openRate} tone="violet" />
       </div>
-
-      {/* Barra de progreso */}
-      {total_r > 0 && (
-        <SectionCard title="Progreso del envío">
-          <div className="mb-2 flex justify-between text-xs text-muted-foreground">
-            <span>Avance total</span>
-            <span className="tabular-nums">{progress}% ({(sent + failed).toLocaleString()} / {total_r.toLocaleString()})</span>
-          </div>
-          <div className="flex h-3 overflow-hidden rounded-full bg-muted">
-            <div className="progress-bar h-full bg-jungle-green-500" style={{ width: `${total_r > 0 ? (sent / total_r) * 100 : 0}%` }} />
-            <div className="progress-bar h-full bg-red-400" style={{ width: `${total_r > 0 ? (failed / total_r) * 100 : 0}%` }} />
-          </div>
-          <div className="mt-3 flex gap-4 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-jungle-green-500" /> Enviados</span>
-            <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-red-400" /> Fallidos</span>
-            <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full bg-muted-foreground/30" /> Pendientes</span>
-          </div>
-        </SectionCard>
-      )}
 
       {/* Tabla de destinatarios */}
       <SectionCard

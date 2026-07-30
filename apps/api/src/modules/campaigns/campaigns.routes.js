@@ -205,9 +205,24 @@ export async function campaignsRoutes(fastify) {
     return { list_id: list.id, total: imported, wame_number: wameNumber }
   })
 
+  // Progreso por CONTACTOS: total = contactos de la lista; hechos = contactos sin
+  // ningún job pendiente (todos sus teléfonos/correos ya procesados). En SQL como
+  // subconsultas para reusar en lista y detalle.
+  const totalContactsSub = sql`(SELECT COUNT(*) FROM list_members lm WHERE lm.list_id = c.list_id)::int`
+  const doneContactsSub = (id) => sql`COALESCE((
+    SELECT COUNT(*) FROM (
+      SELECT cj.contact_id FROM campaign_jobs cj
+      WHERE cj.campaign_id = ${id}
+      GROUP BY cj.contact_id
+      HAVING COUNT(*) FILTER (WHERE cj.status = 'pending') = 0
+    ) t
+  ), 0)::int`
+
   fastify.get('/campaigns', auth, async (req) => {
     return sql`
-      SELECT c.*, cl.name as list_name
+      SELECT c.*, cl.name as list_name,
+        ${totalContactsSub} AS total_contacts,
+        ${doneContactsSub(sql`c.id`)} AS done_contacts
       FROM campaigns c
       JOIN contact_lists cl ON cl.id = c.list_id
       WHERE c.client_id = ${req.user.sub}
@@ -217,7 +232,9 @@ export async function campaignsRoutes(fastify) {
 
   fastify.get('/campaigns/:id', auth, async (req, reply) => {
     const [campaign] = await sql`
-      SELECT c.*, cl.name as list_name
+      SELECT c.*, cl.name as list_name,
+        ${totalContactsSub} AS total_contacts,
+        ${doneContactsSub(req.params.id)} AS done_contacts
       FROM campaigns c
       JOIN contact_lists cl ON cl.id = c.list_id
       WHERE c.id = ${req.params.id} AND c.client_id = ${req.user.sub}
