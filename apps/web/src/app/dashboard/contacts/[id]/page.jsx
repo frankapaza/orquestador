@@ -7,7 +7,7 @@ import api from '../../../../lib/api'
 import {
   Send, ArrowLeft, Mail, Smartphone, MessageCircle, AlertTriangle, XCircle,
   Eye, Link2, Loader2, CheckCircle, Plus, Star, Trash2, X, Inbox, Circle,
-  ArrowDownLeft, ArrowUpRight, Phone, PhoneCall, Copy, Check, AtSign, Calendar, Users, ChevronDown,
+  ArrowDownLeft, ArrowUpRight, Phone, PhoneCall, Copy, Check, AtSign, Calendar, Users, ChevronDown, FileText,
 } from '../../../../components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -955,7 +955,14 @@ export default function Contact360Page() {
             {name?.[0]?.toUpperCase() ?? '?'}
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{name}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="truncate text-2xl font-bold tracking-tight text-foreground">{name}</h1>
+              {contact.document && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-foreground" title="Documento (identidad del contacto)">
+                  <FileText size={12} /> {contact.document}
+                </span>
+              )}
+            </div>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
               {contact.email && (
                 <span className="inline-flex items-center gap-1.5"><AtSign size={13} /> {contact.email}</span>
