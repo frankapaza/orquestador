@@ -229,7 +229,7 @@ export async function campaignsRoutes(fastify) {
   fastify.post('/campaigns', auth, async (req, reply) => {
     const body = campaignSchema.parse(req.body)
 
-    const [list] = await sql`SELECT id, total_count FROM contact_lists WHERE id = ${body.list_id} AND client_id = ${req.user.sub}`
+    const [list] = await sql`SELECT id FROM contact_lists WHERE id = ${body.list_id} AND client_id = ${req.user.sub}`
     if (!list) return reply.code(404).send({ error: 'Lista no encontrada' })
 
     // Campaña IA: los números elegidos deben existir y tener ese asistente vinculado.
@@ -254,6 +254,31 @@ export async function campaignsRoutes(fastify) {
       }
     }
 
+    // Destinatarios reales = DESTINOS (teléfonos/correos), no contactos. Un contacto
+    // con 2 teléfonos y "Todos los números" cuenta como 2. Se calcula igual que en
+    // el envío para que el número coincida antes y después de enviar.
+    const sendAll = body.settings?.send_to_all !== false
+    let destCount
+    if (body.channel === 'email') {
+      const [{ n }] = await sql`
+        SELECT COUNT(*)::int AS n
+        FROM list_members lm
+        JOIN contacts c ON c.id = lm.contact_id AND c.is_subscribed = true
+        JOIN contact_emails ce ON ce.contact_id = c.id ${sendAll ? sql`` : sql`AND ce.is_primary = true`}
+        WHERE lm.list_id = ${body.list_id} AND ce.email IS NOT NULL AND ce.email <> ''
+      `
+      destCount = n
+    } else {
+      const [{ n }] = await sql`
+        SELECT COUNT(*)::int AS n
+        FROM list_members lm
+        JOIN contacts c ON c.id = lm.contact_id AND c.is_subscribed = true
+        JOIN contact_phones cp ON cp.contact_id = c.id ${sendAll ? sql`` : sql`AND cp.is_primary = true`}
+        WHERE lm.list_id = ${body.list_id} AND cp.phone IS NOT NULL AND cp.phone <> ''
+      `
+      destCount = n
+    }
+
     // subject/from_name son NOT NULL; en WhatsApp/SMS se rellenan con el nombre de la campaña.
     const subject  = body.channel === 'email' ? body.subject   : (body.subject   || body.name)
     const fromName = body.channel === 'email' ? body.from_name : (body.from_name || body.name)
@@ -273,7 +298,7 @@ export async function campaignsRoutes(fastify) {
         ${body.reply_to ?? null}, ${body.html_content ?? null}, ${body.text_content ?? null},
         ${body.content_text ?? null}, ${body.media_url || null}, ${body.media_caption ?? null},
         ${body.list_id}, ${body.strategy}, ${body.scheduled_at ?? null},
-        ${sql.json(body.settings)}, ${list.total_count}, ${body.assistant_id ?? null}, ${status}
+        ${sql.json(body.settings)}, ${destCount}, ${body.assistant_id ?? null}, ${status}
       )
       RETURNING *
     `
