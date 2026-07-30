@@ -398,7 +398,7 @@ function ImportModal({ list, onClose, onDone }) {
 
 // ─── Modal agregar contacto individual ──────────────────────────────────────
 function AddContactModal({ list, onClose, onDone }) {
-  const EMPTY = { email: '', first_name: '', last_name: '' }
+  const EMPTY = { document: '', email: '', first_name: '', last_name: '' }
   const [form, setForm]         = useState(EMPTY)
   const [country, setCountry]   = useState(DEFAULT_COUNTRY)
   const [phoneNum, setPhoneNum] = useState('')
@@ -411,17 +411,22 @@ function AddContactModal({ list, onClose, onDone }) {
   async function submit(e) {
     e.preventDefault()
     const digits = phoneNum.replace(/\D/g, '')
+    if (!form.document?.trim()) { setError('El documento es obligatorio'); return }
     if (!form.email && !digits) { setError('Ingresa al menos email o teléfono'); return }
     setLoading(true); setError(null)
     try {
-      await api.post(`/lists/${list.id}/contacts`, {
+      const payload = {
+        document:      form.document.trim(),
         email:         form.email || undefined,
         phone:         digits || undefined,              // número nacional (sin código)
         phone_dial:    digits ? country.dial : undefined, // '+51'
         phone_country: digits ? country.code : undefined, // 'PE'
         first_name:    form.first_name || undefined,
         last_name:     form.last_name  || undefined,
-      })
+      }
+      // Con lista → se agrega a esa lista; sin lista → contacto global.
+      if (list) await api.post(`/lists/${list.id}/contacts`, payload)
+      else await api.post('/contacts', payload)
       setSuccess(true)
       onDone()
       setForm(EMPTY); setPhoneNum('')
@@ -440,7 +445,7 @@ function AddContactModal({ list, onClose, onDone }) {
           </span>
           <div className="min-w-0 flex-1">
             <h2 className="text-base font-semibold text-foreground">Nuevo contacto</h2>
-            <p className="truncate text-xs text-muted-foreground">En la lista "{list.name}"</p>
+            <p className="truncate text-xs text-muted-foreground">{list ? `En la lista "${list.name}"` : 'Se identifica por su documento'}</p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="Cerrar">
             <X size={18} strokeWidth={1.75} />
@@ -458,6 +463,14 @@ function AddContactModal({ list, onClose, onDone }) {
               <CheckCircle size={16} className="shrink-0" /> Contacto guardado
             </div>
           )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="ac-doc" className="flex items-center gap-1.5">
+              <FileText size={14} strokeWidth={1.75} /> Documento *
+              <span className="font-normal text-muted-foreground">(DNI / RUC — identidad)</span>
+            </Label>
+            <Input id="ac-doc" {...field('document')} placeholder="12345678" className={inputBase} required />
+          </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -696,6 +709,8 @@ function GlobalContacts() {
   const [page, setPage]         = useState(1)
   const [q, setQ]               = useState('')
   const [loading, setLoading]   = useState(true)
+  const [showAdd, setShowAdd]   = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const LIMIT = 30
 
   useEffect(() => { setPage(1) }, [q])
@@ -709,21 +724,23 @@ function GlobalContacts() {
         .finally(() => { if (!cancel) setLoading(false) })
     }, 250)
     return () => { cancel = true; clearTimeout(t) }
-  }, [q, page])
+  }, [q, page, reloadKey])
 
   const pages = Math.max(1, Math.ceil(total / LIMIT))
   const fullName = c => [c.first_name, c.last_name].filter(Boolean).join(' ') || 'Sin nombre'
 
   return (
     <SectionCard noPadding>
-      <div className="border-b p-3">
-        <div className="relative">
+      <div className="flex items-center gap-3 border-b p-3">
+        <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={e => setQ(e.target.value)}
             placeholder="Buscar por documento, nombre, teléfono o correo..."
             className="h-11 rounded-xl border-transparent bg-muted/60 pl-9 text-sm shadow-none transition-colors focus-visible:border-ring focus-visible:bg-background focus-visible:ring-0" />
         </div>
+        <Button onClick={() => setShowAdd(true)} className="shrink-0"><UserPlus size={16} strokeWidth={1.75} /> Nuevo contacto</Button>
       </div>
+      {showAdd && <AddContactModal onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); setReloadKey(k => k + 1) }} />}
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">

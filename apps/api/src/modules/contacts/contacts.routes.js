@@ -116,6 +116,71 @@ export async function contactsRoutes(fastify) {
 
   // --- Contactos ---
 
+  // Crear contacto GLOBAL (no atado a una lista). Identidad por documento: si ya
+  // existe, se reutiliza y se le suman teléfono/correo/listas (no se duplica).
+  fastify.post('/contacts', auth, async (req, reply) => {
+    const body = z.object({
+      document:      z.string().min(3),
+      first_name:    z.string().optional(),
+      last_name:     z.string().optional(),
+      phone:         z.string().optional(),
+      phone_dial:    z.string().optional(),
+      phone_country: z.string().length(2).optional(),
+      email:         z.string().email().optional().or(z.literal('')),
+      list_ids:      z.array(z.string().uuid()).optional().default([]),
+      metadata:      z.record(z.any()).optional().default({}),
+    }).parse(req.body)
+
+    const clientId = req.user.sub
+    const sp = splitPhone(body.phone, { country: body.phone_country, dial: body.phone_dial })
+
+    let [contact] = await sql`SELECT * FROM contacts WHERE client_id = ${clientId} AND document = ${body.document} LIMIT 1`
+    if (contact) {
+      await sql`
+        UPDATE contacts
+        SET first_name = COALESCE(${body.first_name ?? null}, first_name),
+            last_name  = COALESCE(${body.last_name ?? null}, last_name),
+            metadata   = COALESCE(metadata, '{}'::jsonb) || ${sql.json(body.metadata)}
+        WHERE id = ${contact.id}
+      `
+    } else {
+      ;[contact] = await sql`
+        INSERT INTO contacts (client_id, document, first_name, last_name, metadata)
+        VALUES (${clientId}, ${body.document}, ${body.first_name ?? null}, ${body.last_name ?? null}, ${sql.json(body.metadata)})
+        RETURNING *
+      `
+    }
+
+    if (sp.national) {
+      await sql`
+        INSERT INTO contact_phones (contact_id, client_id, phone, phone_dial, phone_country, label, is_primary)
+        VALUES (${contact.id}, ${clientId}, ${sp.national}, ${sp.dial || null}, ${sp.country || null}, 'Móvil',
+                NOT EXISTS (SELECT 1 FROM contact_phones WHERE contact_id = ${contact.id}))
+        ON CONFLICT (contact_id, phone) DO NOTHING
+      `
+    }
+    if (body.email) {
+      await sql`
+        INSERT INTO contact_emails (contact_id, client_id, email, label, is_primary)
+        VALUES (${contact.id}, ${clientId}, ${body.email}, 'Principal',
+                NOT EXISTS (SELECT 1 FROM contact_emails WHERE contact_id = ${contact.id}))
+        ON CONFLICT (contact_id, email) DO NOTHING
+      `
+    }
+    for (const lid of body.list_ids) {
+      await sql`
+        INSERT INTO list_members (list_id, contact_id)
+        SELECT ${lid}, ${contact.id}
+        WHERE EXISTS (SELECT 1 FROM contact_lists WHERE id = ${lid} AND client_id = ${clientId})
+        ON CONFLICT DO NOTHING
+      `
+    }
+    if (body.list_ids.length) {
+      await sql`UPDATE contact_lists SET total_count = (SELECT COUNT(*) FROM list_members WHERE list_id = contact_lists.id) WHERE id IN ${sql(body.list_ids)}`
+    }
+    return reply.code(201).send(contact)
+  })
+
   // Hub GLOBAL de contactos: buscar por documento / nombre / teléfono / correo,
   // independiente de la lista. Un contacto = una fila (identidad por documento).
   fastify.get('/contacts', auth, async (req) => {
