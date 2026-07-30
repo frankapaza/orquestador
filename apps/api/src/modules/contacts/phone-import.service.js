@@ -24,29 +24,36 @@ export async function upsertContactsByPhone(clientId, listId, rows) {
     // Buscar el contacto existente: documento → teléfono → correo.
     let contactId = null
     if (r.document) {
+      // El documento es la IDENTIDAD: manda siempre. Si viene documento, se busca
+      // SOLO por documento. NO se cae a teléfono/correo, porque un número/correo
+      // puede pertenecer a otra persona (otro documento) que lo comparte. Si el
+      // documento no existe, se crea un contacto nuevo (aunque el teléfono ya
+      // esté en otro contacto: el número es un canal, puede ser de varios).
       const [c] = await sql`
         SELECT id FROM contacts WHERE client_id = ${clientId} AND document = ${r.document} LIMIT 1
       `
       contactId = c?.id ?? null
-    }
-    if (!contactId && r.full) {
-      const [c] = await sql`
-        SELECT cp.contact_id AS id FROM contact_phones cp
-        JOIN contacts co ON co.id = cp.contact_id
-        WHERE co.client_id = ${clientId}
-          AND (COALESCE(cp.phone_dial,'') || cp.phone) = ${r.full}
-        LIMIT 1
-      `
-      contactId = c?.id ?? null
-    }
-    if (!contactId && r.email) {
-      const [c] = await sql`
-        SELECT ce.contact_id AS id FROM contact_emails ce
-        JOIN contacts co ON co.id = ce.contact_id
-        WHERE co.client_id = ${clientId} AND ce.email = ${r.email}
-        LIMIT 1
-      `
-      contactId = c?.id ?? null
+    } else {
+      // Sin documento (llamadas internas / data vieja): dedup por teléfono → correo.
+      if (r.full) {
+        const [c] = await sql`
+          SELECT cp.contact_id AS id FROM contact_phones cp
+          JOIN contacts co ON co.id = cp.contact_id
+          WHERE co.client_id = ${clientId}
+            AND (COALESCE(cp.phone_dial,'') || cp.phone) = ${r.full}
+          LIMIT 1
+        `
+        contactId = c?.id ?? null
+      }
+      if (!contactId && r.email) {
+        const [c] = await sql`
+          SELECT ce.contact_id AS id FROM contact_emails ce
+          JOIN contacts co ON co.id = ce.contact_id
+          WHERE co.client_id = ${clientId} AND ce.email = ${r.email}
+          LIMIT 1
+        `
+        contactId = c?.id ?? null
+      }
     }
 
     if (contactId) {
