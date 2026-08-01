@@ -31,6 +31,12 @@ export async function whatsappRoutes(fastify) {
       ? sql`AND wa.assigned_member_id = ${req.user.member_id}`
       : sql``
 
+    // Filtro opcional por rol: ?role=advisor (chat individual) | ?role=campaign (campañas)
+    const roleParam = req.query?.role
+    const roleFilter = (roleParam === 'advisor' || roleParam === 'campaign')
+      ? sql`AND wa.role = ${roleParam}`
+      : sql``
+
     const accounts = await sql`
       SELECT wa.id, wa.name, wa.phone_number, wa.instance_name,
              wa.evolution_url, wa.provider,
@@ -42,7 +48,7 @@ export async function whatsappRoutes(fastify) {
              cm.email AS assigned_member_email
       FROM whatsapp_accounts wa
       LEFT JOIN client_members cm ON cm.id = wa.assigned_member_id
-      WHERE wa.client_id = ${req.user.sub} ${memberFilter}
+      WHERE wa.client_id = ${req.user.sub} ${memberFilter} ${roleFilter}
       ORDER BY wa.created_at DESC
     `
 
