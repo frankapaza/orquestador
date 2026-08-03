@@ -76,6 +76,25 @@ export async function whatsappRoutes(fastify) {
     `
     if (existing) return reply.code(409).send({ error: 'Ya existe una cuenta con ese nombre de instancia' })
 
+    // Un número = un rol: no permitir el mismo teléfono en otra cuenta. Evita que
+    // un número exista a la vez como advisor y campaign (mezclaría inbox vs campañas).
+    if (body.phone_number && String(body.phone_number).trim()) {
+      const digits = String(body.phone_number).replace(/\D/g, '')
+      if (digits) {
+        const [dup] = await sql`
+          SELECT id, name, role FROM whatsapp_accounts
+          WHERE client_id = ${req.user.sub}
+            AND regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g') = ${digits}
+          LIMIT 1
+        `
+        if (dup) {
+          return reply.code(409).send({
+            error: `El número ${body.phone_number} ya está registrado en la cuenta "${dup.name}" (rol ${dup.role}). Un número solo puede tener un rol (Individual o Campaña).`,
+          })
+        }
+      }
+    }
+
     // Para Evolution API, crear instancia en el servidor remoto
     if (body.provider === 'evolution') {
       const adapter = new EvolutionAdapter({ ...body, instance_name: body.instance_name })
@@ -187,6 +206,24 @@ export async function whatsappRoutes(fastify) {
     if (account.provider !== 'baileys') return reply.code(400).send({ error: 'Solo disponible para cuentas Baileys' })
 
     const { phone_number } = z.object({ phone_number: z.string().min(6) }).parse(req.body)
+
+    // Un número = un rol: al emparejar, verificar que el número no esté ya en OTRA
+    // cuenta (evita duplicar el mismo teléfono como advisor y campaign).
+    const digitsPair = String(phone_number).replace(/\D/g, '')
+    if (digitsPair) {
+      const [dupPair] = await sql`
+        SELECT id, name, role FROM whatsapp_accounts
+        WHERE client_id = ${req.user.sub}
+          AND id <> ${req.params.id}
+          AND regexp_replace(COALESCE(phone_number, ''), '[^0-9]', '', 'g') = ${digitsPair}
+        LIMIT 1
+      `
+      if (dupPair) {
+        return reply.code(409).send({
+          error: `El número ${phone_number} ya está registrado en la cuenta "${dupPair.name}" (rol ${dupPair.role}). Un número solo puede tener un rol (Individual o Campaña).`,
+        })
+      }
+    }
 
     // Guardar número y limpiar sesión anterior para empezar limpio
     await sql`UPDATE whatsapp_accounts SET phone_number = ${phone_number} WHERE id = ${req.params.id}`
