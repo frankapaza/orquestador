@@ -12,7 +12,7 @@ import { Input }        from '@/components/ui/input'
 import { CountryPhoneInput, Flag, DEFAULT_COUNTRY, resolveCountry, nationalNumber } from '@/components/ui/phone-input'
 import { SelectMenu } from '@/components/ui/select-menu'
 import { Skeleton } from '@/components/ui/skeleton'
-import { PhoneCall, QrCode, RefreshCw, RotateCcw, Trash2, Save, Zap, Link2, User, Plus, CheckCircle, Loader2, Smartphone, Wifi, X, Clock, Gauge, ChevronDown, Megaphone, MessageCircle } from '../../../components/ui/icons'
+import { PhoneCall, QrCode, RefreshCw, RotateCcw, Trash2, Save, Zap, Link2, User, Plus, CheckCircle, Loader2, Smartphone, Wifi, X, Clock, Gauge, ChevronDown, Megaphone, MessageCircle, AlertTriangle } from '../../../components/ui/icons'
 
 // Tipo de número: Individual (conversaciones 1 a 1) o Campaña (envíos masivos)
 const ROLE_OPTIONS = [
@@ -357,7 +357,18 @@ export default function WhatsappAccountsPage() {
             </div>
 
             {error && (
-              <div className="mx-6 mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+              <div className="mx-6 mt-4 flex items-start gap-3 rounded-xl border border-red-200/80 bg-red-50/90 px-4 py-3.5 shadow-sm dark:border-red-900/50 dark:bg-red-950/40">
+                <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/60 dark:text-red-300">
+                  <AlertTriangle size={16} strokeWidth={2.2} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[13px] font-semibold text-red-800 dark:text-red-200">No se pudo guardar</p>
+                  <p className="mt-0.5 text-[13px] leading-relaxed text-red-700/90 dark:text-red-300/90">{error}</p>
+                </div>
+                <button type="button" onClick={() => setError(null)} className="shrink-0 rounded-md p-1 text-red-400 transition-colors hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/50" aria-label="Cerrar">
+                  <X size={15} />
+                </button>
+              </div>
             )}
 
             <form onSubmit={submit} className="space-y-5 overflow-y-auto p-6">
@@ -572,7 +583,12 @@ export default function WhatsappAccountsPage() {
                           <label className="mb-1.5 block text-xs font-semibold text-foreground">Número del teléfono a vincular</label>
                           <CountryPhoneInput country={pairCountry} setCountry={setPairCountry} number={pairNum} setNumber={setPairNum} placeholder="910 462 070" />
                         </div>
-                        {pairingError && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{pairingError}</p>}
+                        {pairingError && (
+                          <div className="flex items-start gap-2.5 rounded-lg border border-red-200/80 bg-red-50/90 px-3 py-2.5 dark:border-red-900/50 dark:bg-red-950/40">
+                            <AlertTriangle size={15} strokeWidth={2.2} className="mt-0.5 shrink-0 text-red-500 dark:text-red-400" />
+                            <p className="text-xs leading-relaxed text-red-700 dark:text-red-300">{pairingError}</p>
+                          </div>
+                        )}
                         <Button onClick={requestPairingCode} disabled={pairingLoading} className="w-full">
                           {pairingLoading ? <><Loader2 size={16} className="animate-spin" /> Generando código...</> : 'Obtener código'}
                         </Button>

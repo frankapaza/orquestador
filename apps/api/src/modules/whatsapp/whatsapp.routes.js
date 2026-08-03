@@ -88,8 +88,9 @@ export async function whatsappRoutes(fastify) {
           LIMIT 1
         `
         if (dup) {
+          const usoActual = dup.role === 'campaign' ? 'Campaña' : 'Individual'
           return reply.code(409).send({
-            error: `El número ${body.phone_number} ya está registrado en la cuenta "${dup.name}" (rol ${dup.role}). Un número solo puede tener un rol (Individual o Campaña).`,
+            error: `El número ${body.phone_number} ya está en uso por «${dup.name}» (${usoActual}). Cada número de WhatsApp puede usarse en un solo lugar: para mensajes individuales o para campañas, no ambos.`,
           })
         }
       }
@@ -219,8 +220,9 @@ export async function whatsappRoutes(fastify) {
         LIMIT 1
       `
       if (dupPair) {
+        const usoActualPair = dupPair.role === 'campaign' ? 'Campaña' : 'Individual'
         return reply.code(409).send({
-          error: `El número ${phone_number} ya está registrado en la cuenta "${dupPair.name}" (rol ${dupPair.role}). Un número solo puede tener un rol (Individual o Campaña).`,
+          error: `El número ${phone_number} ya está en uso por «${dupPair.name}» (${usoActualPair}). Cada número de WhatsApp puede usarse en un solo lugar: para mensajes individuales o para campañas, no ambos.`,
         })
       }
     }
