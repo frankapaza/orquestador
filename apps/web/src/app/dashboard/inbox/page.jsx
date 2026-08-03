@@ -629,6 +629,12 @@ const STATUS_FILTERS = [
   { key: 'closed', label: 'Cerradas' },
   { key: 'all',    label: 'Todas' },
 ]
+// Rol del número: separa el chat 1-a-1 (Individual) de las conversaciones de campaña.
+const ROLE_FILTERS = [
+  { key: 'advisor',  label: 'Individual' },
+  { key: 'campaign', label: 'Campaña' },
+  { key: '',         label: 'Todas' },
+]
 const CHANNEL_FILTERS = [
   { key: '',         label: 'Todos', Icon: null },
   { key: 'whatsapp', label: 'WhatsApp', Icon: MessageCircle },
@@ -644,6 +650,9 @@ export default function InboxPage() {
   const [channelFilter, setChannelFilter] = useState('')
   const [statusFilter, setStatusFilter]   = useState('open')
   const [accountFilter, setAccountFilter] = useState('')
+  // Filtro por rol del número: '' (Todas) | 'advisor' (Individual) | 'campaign' (Campaña).
+  // Por defecto Individual: separa el chat 1-a-1 de las conversaciones de campaña.
+  const [roleFilter, setRoleFilter]       = useState('advisor')
   const [unreadOnly, setUnreadOnly]       = useState(false)
   const [search, setSearch]               = useState('')
   const [accounts, setAccounts]           = useState([])
@@ -666,9 +675,10 @@ export default function InboxPage() {
     const params = new URLSearchParams()
     if (channelFilter) params.set('channel', channelFilter)
     if (accountFilter) params.set('account', accountFilter)
+    if (roleFilter)    params.set('role', roleFilter)
     params.set('status', statusFilter)
     api.get(`/conversations?${params.toString()}`).then(r => setConversations(r.data)).catch(() => {})
-  }, [channelFilter, statusFilter, accountFilter])
+  }, [channelFilter, statusFilter, accountFilter, roleFilter])
 
   useEffect(() => { loadConversations() }, [loadConversations])
 
@@ -909,12 +919,23 @@ export default function InboxPage() {
 
   // Tabs de canal y selector de número se sincronizan para no dejar combinaciones
   // imposibles (p.ej. gateway SMS + tab WhatsApp = 0 chats siempre).
-  const accountOptions = accounts.filter(a => !channelFilter || a.channel === channelFilter)
+  // También se filtran por rol (Individual/Campaña); los SMS no tienen rol.
+  const accountOptions = accounts.filter(a =>
+    (!channelFilter || a.channel === channelFilter) &&
+    (!roleFilter || a.role === roleFilter)
+  )
 
   function pickAccount(id) {
     setAccountFilter(id)
     const acc = accounts.find(a => a.id === id)
     if (acc) setChannelFilter(acc.channel) // el número define el canal
+  }
+
+  // Cambiar el rol (Individual/Campaña/Todas): si el número activo ya no encaja
+  // con el rol elegido, se limpia para no quedar con una vía inconsistente.
+  function pickRole(key) {
+    setRoleFilter(key)
+    if (key && activeAccount && activeAccount.role !== key) setAccountFilter('')
   }
 
   function pickChannel(key) {
@@ -937,6 +958,19 @@ export default function InboxPage() {
           <Button size="sm" className="h-8 gap-1.5 px-3" onClick={() => { setNewMsgOpts(null); setShowNew(true) }}>
             <Plus size={14} strokeWidth={2} /> Nuevo
           </Button>
+        </div>
+
+        {/* Rol del número: Individual (chat 1-a-1) vs Campaña. Por defecto Individual. */}
+        <div className="px-4 pb-2.5">
+          <div className="flex rounded-lg bg-muted p-0.5">
+            {ROLE_FILTERS.map(({ key, label }) => (
+              <button key={key || 'all'} onClick={() => pickRole(key)}
+                className={cn('flex-1 rounded-md px-2 py-1 text-[12px] font-medium transition-colors',
+                  roleFilter === key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground')}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Número activo: filtra los chats Y es el emisor de los mensajes nuevos */}

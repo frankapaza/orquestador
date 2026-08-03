@@ -162,12 +162,15 @@ export async function conversationsRoutes(fastify) {
 
   // Listar conversaciones (inbox)
   fastify.get('/conversations', { onRequest: pre }, async (req) => {
-    const { channel, status = 'open', account, page = 1, limit = 30 } = req.query
+    const { channel, status = 'open', account, role, page = 1, limit = 30 } = req.query
     const offset = (page - 1) * limit
 
     const channelFilter   = channel ? sql`AND c.channel = ${channel}` : sql``
     const statusFilter    = (status && status !== 'all') ? sql`AND c.status = ${status}` : sql``
     const accountIdFilter = account ? sql`AND c.account_id::text = ${account}` : sql``
+    // Filtro por rol del número: 'advisor' (Individual) | 'campaign' (Campaña).
+    // Solo aplica a WhatsApp (los SMS no tienen rol → quedan fuera si se filtra).
+    const roleFilter      = (role === 'advisor' || role === 'campaign') ? sql`AND wa.role = ${role}` : sql``
 
     // Asesores: filtrar solo conversaciones de sus canales asignados
     let accountFilter = sql``
@@ -209,6 +212,7 @@ export async function conversationsRoutes(fastify) {
         ${statusFilter}
         ${channelFilter}
         ${accountIdFilter}
+        ${roleFilter}
         ${accountFilter}
       ORDER BY c.last_message_at DESC NULLS LAST
       LIMIT ${limit} OFFSET ${offset}
