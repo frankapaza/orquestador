@@ -357,7 +357,7 @@ export default function WhatsappAccountsPage() {
             </div>
 
             {error && (
-              <div className="mx-6 mt-4 flex items-start gap-3 rounded-xl border border-red-200/80 bg-red-50/90 px-4 py-3.5 shadow-sm dark:border-red-900/50 dark:bg-red-950/40">
+              <div className="mx-6 mb-2 mt-5 flex items-start gap-3 rounded-xl border border-red-200/80 bg-red-50/90 px-4 py-3.5 shadow-sm dark:border-red-900/50 dark:bg-red-950/40">
                 <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-900/60 dark:text-red-300">
                   <AlertTriangle size={16} strokeWidth={2.2} />
                 </div>
